@@ -185,5 +185,7 @@ sys-autopilot.json  NPDM descriptor (title ID 4200000000004150,
 - Screenshots fail (HTTP 500 with the Horizon result code) in the rare
   contexts where the OS blocks capture.
 - The server is single-threaded by design: input taps with a duration block
-  until released, which conveniently serializes agent actions.
+  until released, which conveniently serializes agent actions. Socket I/O is
+  non-blocking under the hood (poll()-based with a 10s inactivity timeout),
+  so a stalled or misbehaving client cannot wedge the server.
 - No TLS; treat the API as LAN-trusted.

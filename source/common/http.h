@@ -23,7 +23,14 @@ typedef struct {
     char   buf[HTTP_MAX_HEADER];
 } HttpRequest;
 
+// Optional callback invoked while waiting on socket I/O (~every 100ms).
+// Return false to abort the transfer (used for clean shutdown).
+typedef bool (*HttpIdleCb)(void);
+void http_set_idle_callback(HttpIdleCb cb);
+
 // Reads and parses a request's start-line + headers from fd.
+// Sockets may be non-blocking: all I/O internally waits via poll() with a
+// 10s inactivity timeout.
 // Returns false on malformed input / connection error.
 bool http_read_request(int fd, HttpRequest *req);
 

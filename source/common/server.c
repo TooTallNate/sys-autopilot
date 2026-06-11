@@ -8,10 +8,18 @@
 #include <errno.h>
 #include <unistd.h>
 #include <poll.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <switch.h>
+
+static bool set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0)
+        return false;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+}
 
 static int create_listener(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -20,6 +28,7 @@ static int create_listener(int port) {
 
     int opt = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    set_nonblocking(fd);
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -38,10 +47,10 @@ static int create_listener(int port) {
 }
 
 static void handle_connection(int fd, const Config *cfg) {
-    // Bound how long a single client can stall us.
-    struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    // Non-blocking I/O: the http layer waits via poll() with an inactivity
+    // timeout, so a stalled client can't wedge the server, and the idle
+    // callback keeps running during slow transfers.
+    set_nonblocking(fd);
 
     static HttpRequest req; // single-threaded server; keep off the stack
     if (!http_read_request(fd, &req))
@@ -58,6 +67,9 @@ static void handle_connection(int fd, const Config *cfg) {
 
 void server_run(const Config *cfg, ServerIdleCb idle) {
     int listen_fd = -1;
+
+    // Let the http I/O layer drive the idle callback during transfers too.
+    http_set_idle_callback(idle);
 
     for (;;) {
         if (listen_fd < 0) {
@@ -92,7 +104,9 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
 
         int client = accept(listen_fd, NULL, NULL);
         if (client < 0) {
-            LOGF("server: accept failed (errno=%d)\n", errno);
+            // EAGAIN: spurious wakeup on the non-blocking listener.
+            if (errno != EAGAIN && errno != EWOULDBLOCK)
+                LOGF("server: accept failed (errno=%d)\n", errno);
             continue;
         }
 
@@ -100,6 +114,7 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
         close(client);
     }
 
+    http_set_idle_callback(NULL);
     if (listen_fd >= 0)
         close(listen_fd);
 }

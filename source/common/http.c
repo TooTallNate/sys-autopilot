@@ -8,7 +8,59 @@
 #include <ctype.h>
 #include <errno.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/socket.h>
+
+// Abort a connection after this much I/O inactivity.
+#define HTTP_IO_TIMEOUT_MS 10000
+// Poll in short slices so the idle callback keeps running during transfers.
+#define HTTP_POLL_SLICE_MS 100
+
+static HttpIdleCb g_idle_cb;
+
+void http_set_idle_callback(HttpIdleCb cb) {
+    g_idle_cb = cb;
+}
+
+// Waits until fd is ready for `events`. Returns false on inactivity timeout,
+// poll error, or when the idle callback requests shutdown.
+static bool io_wait(int fd, short events) {
+    int waited_ms = 0;
+    while (waited_ms < HTTP_IO_TIMEOUT_MS) {
+        if (g_idle_cb && !g_idle_cb())
+            return false;
+        struct pollfd pfd = { .fd = fd, .events = events };
+        int pr = poll(&pfd, 1, HTTP_POLL_SLICE_MS);
+        if (pr < 0) {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        // On POLLERR/POLLHUP, return true so recv/send surfaces the error.
+        if (pr > 0 && (pfd.revents & (events | POLLERR | POLLHUP)))
+            return true;
+        waited_ms += HTTP_POLL_SLICE_MS;
+    }
+    return false;
+}
+
+// recv() that tolerates non-blocking sockets: waits for readability on
+// EAGAIN/EWOULDBLOCK instead of failing.
+static ssize_t io_recv(int fd, void *buf, size_t len) {
+    for (;;) {
+        ssize_t n = recv(fd, buf, len, 0);
+        if (n >= 0)
+            return n;
+        if (errno == EINTR)
+            continue;
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            if (!io_wait(fd, POLLIN))
+                return -1;
+            continue;
+        }
+        return -1;
+    }
+}
 
 static const char *status_reason(int code) {
     switch (code) {
@@ -32,11 +84,18 @@ bool http_write_all(int fd, const void *buf, size_t len) {
     const char *p = buf;
     while (len > 0) {
         ssize_t n = send(fd, p, len, 0);
-        if (n <= 0) {
-            if (n < 0 && errno == EINTR)
+        if (n < 0) {
+            if (errno == EINTR)
                 continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (!io_wait(fd, POLLOUT))
+                    return false;
+                continue;
+            }
             return false;
         }
+        if (n == 0)
+            return false;
         p += n;
         len -= (size_t)n;
     }
@@ -80,7 +139,7 @@ bool http_read_request(int fd, HttpRequest *req) {
     size_t total = 0;
     char *hdr_end = NULL;
     while (total < sizeof(req->buf) - 1) {
-        ssize_t n = recv(fd, req->buf + total, sizeof(req->buf) - 1 - total, 0);
+        ssize_t n = io_recv(fd, req->buf + total, sizeof(req->buf) - 1 - total);
         if (n <= 0)
             return false;
         total += (size_t)n;
@@ -195,10 +254,7 @@ ssize_t http_read_body(HttpRequest *req, void *buf, size_t len) {
         req->sent_100 = true;
     }
 
-    ssize_t n;
-    do {
-        n = recv(req->fd, buf, len, 0);
-    } while (n < 0 && errno == EINTR);
+    ssize_t n = io_recv(req->fd, buf, len);
     if (n > 0)
         req->body_consumed += (size_t)n;
     return n;
