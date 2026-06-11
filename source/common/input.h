@@ -16,10 +16,6 @@ Result input_attach(void);
 Result input_detach(void);
 bool   input_is_attached(void);
 
-// Parses a comma-separated button list ("A,B,HOME") into a button mask.
-// Returns false on any unknown button name.
-bool input_parse_buttons(const char *csv, u64 *out_mask);
-
 // Press+release: applies mask, sleeps duration_ms, releases mask.
 Result input_tap(u64 mask, int duration_ms);
 

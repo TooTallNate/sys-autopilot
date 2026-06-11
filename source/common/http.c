@@ -1,4 +1,5 @@
 #include "http.h"
+#include "base64.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -260,60 +261,41 @@ ssize_t http_read_body(HttpRequest *req, void *buf, size_t len) {
     return n;
 }
 
-// --- Basic auth -------------------------------------------------------------
+// --- Authentication -----------------------------------------------------------
 
-static int b64_val(char c) {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
-    return -1;
-}
-
-static size_t b64_decode(const char *in, char *out, size_t outsz) {
-    size_t o = 0;
-    int acc = 0, bits = 0;
-    for (; *in && *in != '='; in++) {
-        int v = b64_val(*in);
-        if (v < 0)
-            return 0;
-        acc = (acc << 6) | v;
-        bits += 6;
-        if (bits >= 8) {
-            bits -= 8;
-            if (o + 1 >= outsz)
-                return 0;
-            out[o++] = (char)((acc >> bits) & 0xFF);
-        }
+// Constant-time string comparison (length difference folds into diff).
+static bool secure_streq(const char *a, const char *b) {
+    size_t alen = strlen(a), blen = strlen(b);
+    unsigned char diff = (unsigned char)(alen ^ blen);
+    size_t max = alen > blen ? alen : blen;
+    for (size_t i = 0; i < max; i++) {
+        unsigned char ca = i < alen ? (unsigned char)a[i] : 0;
+        unsigned char cb = i < blen ? (unsigned char)b[i] : 0;
+        diff |= (unsigned char)(ca ^ cb);
     }
-    out[o] = '\0';
-    return o;
+    return diff == 0;
 }
 
 bool http_check_basic_auth(const HttpRequest *req, const char *user, const char *pass) {
     if (strncasecmp(req->auth, "Basic ", 6) != 0)
         return false;
 
-    char decoded[160];
+    char decoded[200];
     if (b64_decode(req->auth + 6, decoded, sizeof(decoded)) == 0)
         return false;
 
-    char expected[160];
+    char expected[200];
     int n = snprintf(expected, sizeof(expected), "%s:%s", user, pass);
     if (n < 0 || (size_t)n >= sizeof(expected))
         return false;
 
-    // Constant-time comparison (length difference still folds into diff).
-    size_t dlen = strlen(decoded), elen = strlen(expected);
-    unsigned char diff = (unsigned char)(dlen ^ elen);
-    size_t max = dlen > elen ? dlen : elen;
-    for (size_t i = 0; i < max; i++) {
-        unsigned char a = i < dlen ? (unsigned char)decoded[i] : 0;
-        unsigned char b = i < elen ? (unsigned char)expected[i] : 0;
-        diff |= (unsigned char)(a ^ b);
-    }
-    return diff == 0;
+    return secure_streq(decoded, expected);
+}
+
+bool http_check_bearer_auth(const HttpRequest *req, const char *token) {
+    if (strncasecmp(req->auth, "Bearer ", 7) != 0)
+        return false;
+    return secure_streq(req->auth + 7, token);
 }
 
 // --- Responses ---------------------------------------------------------------
@@ -354,18 +336,25 @@ void http_send_error(int fd, int code, const char *msg) {
     http_send_json(fd, code, "{\"error\":\"%s\"}", msg);
 }
 
-void http_send_unauthorized(int fd) {
+void http_send_unauthorized(int fd, bool offer_basic, bool offer_bearer) {
     const char *body = "{\"error\":\"unauthorized\"}";
+    char challenges[160] = "";
+    if (offer_bearer)
+        strlcat(challenges, "WWW-Authenticate: Bearer realm=\"sys-autopilot\"\r\n",
+                sizeof(challenges));
+    if (offer_basic)
+        strlcat(challenges, "WWW-Authenticate: Basic realm=\"sys-autopilot\"\r\n",
+                sizeof(challenges));
     char hdr[512];
     int n = snprintf(hdr, sizeof(hdr),
                      "HTTP/1.1 401 Unauthorized\r\n"
                      "Server: sys-autopilot\r\n"
-                     "WWW-Authenticate: Basic realm=\"sys-autopilot\"\r\n"
+                     "%s"
                      "Content-Type: application/json\r\n"
                      "Content-Length: %zu\r\n"
                      "Connection: close\r\n"
                      "\r\n",
-                     strlen(body));
+                     challenges, strlen(body));
     http_write_all(fd, hdr, (size_t)n);
     http_write_all(fd, body, strlen(body));
 }

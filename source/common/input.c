@@ -1,8 +1,31 @@
 #include "input.h"
+#include "buttons.h"
 #include "log.h"
 
+#include <assert.h>
 #include <string.h>
 #include <strings.h>
+
+// buttons.h mirrors the libnx bit values so it stays host-testable; make
+// sure they can never drift.
+static_assert(BTN_A == HidNpadButton_A, "button mask drift");
+static_assert(BTN_B == HidNpadButton_B, "button mask drift");
+static_assert(BTN_X == HidNpadButton_X, "button mask drift");
+static_assert(BTN_Y == HidNpadButton_Y, "button mask drift");
+static_assert(BTN_LSTICK == HidNpadButton_StickL, "button mask drift");
+static_assert(BTN_RSTICK == HidNpadButton_StickR, "button mask drift");
+static_assert(BTN_L == HidNpadButton_L, "button mask drift");
+static_assert(BTN_R == HidNpadButton_R, "button mask drift");
+static_assert(BTN_ZL == HidNpadButton_ZL, "button mask drift");
+static_assert(BTN_ZR == HidNpadButton_ZR, "button mask drift");
+static_assert(BTN_PLUS == HidNpadButton_Plus, "button mask drift");
+static_assert(BTN_MINUS == HidNpadButton_Minus, "button mask drift");
+static_assert(BTN_LEFT == HidNpadButton_Left, "button mask drift");
+static_assert(BTN_UP == HidNpadButton_Up, "button mask drift");
+static_assert(BTN_RIGHT == HidNpadButton_Right, "button mask drift");
+static_assert(BTN_DOWN == HidNpadButton_Down, "button mask drift");
+static_assert(BTN_HOME == HiddbgNpadButton_Home, "button mask drift");
+static_assert(BTN_CAPTURE == HiddbgNpadButton_Capture, "button mask drift");
 
 static u8 g_workmem[0x1000] __attribute__((aligned(0x1000)));
 static HiddbgHdlsSessionId g_session_id;
@@ -10,38 +33,6 @@ static HiddbgHdlsHandle g_handle;
 static HiddbgHdlsState g_state;
 static bool g_initialized;
 static bool g_attached;
-
-typedef struct {
-    const char *name;
-    u64 mask;
-} ButtonMap;
-
-static const ButtonMap kButtons[] = {
-    { "A",       HidNpadButton_A },
-    { "B",       HidNpadButton_B },
-    { "X",       HidNpadButton_X },
-    { "Y",       HidNpadButton_Y },
-    { "L",       HidNpadButton_L },
-    { "R",       HidNpadButton_R },
-    { "ZL",      HidNpadButton_ZL },
-    { "ZR",      HidNpadButton_ZR },
-    { "PLUS",    HidNpadButton_Plus },
-    { "START",   HidNpadButton_Plus },
-    { "MINUS",   HidNpadButton_Minus },
-    { "SELECT",  HidNpadButton_Minus },
-    { "UP",      HidNpadButton_Up },
-    { "DOWN",    HidNpadButton_Down },
-    { "LEFT",    HidNpadButton_Left },
-    { "RIGHT",   HidNpadButton_Right },
-    { "DUP",     HidNpadButton_Up },
-    { "DDOWN",   HidNpadButton_Down },
-    { "DLEFT",   HidNpadButton_Left },
-    { "DRIGHT",  HidNpadButton_Right },
-    { "LSTICK",  HidNpadButton_StickL },
-    { "RSTICK",  HidNpadButton_StickR },
-    { "HOME",    HiddbgNpadButton_Home },
-    { "CAPTURE", HiddbgNpadButton_Capture },
-};
 
 Result input_init(void) {
     Result rc = hiddbgAttachHdlsWorkBuffer(&g_session_id, g_workmem, sizeof(g_workmem));
@@ -103,37 +94,6 @@ Result input_detach(void) {
 
 bool input_is_attached(void) {
     return g_attached;
-}
-
-bool input_parse_buttons(const char *csv, u64 *out_mask) {
-    u64 mask = 0;
-    const char *p = csv;
-    while (*p) {
-        const char *comma = strchr(p, ',');
-        size_t len = comma ? (size_t)(comma - p) : strlen(p);
-        if (len == 0 || len > 16)
-            return false;
-
-        bool found = false;
-        for (size_t i = 0; i < sizeof(kButtons) / sizeof(kButtons[0]); i++) {
-            if (strlen(kButtons[i].name) == len &&
-                strncasecmp(p, kButtons[i].name, len) == 0) {
-                mask |= kButtons[i].mask;
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            return false;
-
-        if (!comma)
-            break;
-        p = comma + 1;
-    }
-    if (mask == 0)
-        return false;
-    *out_mask = mask;
-    return true;
 }
 
 static Result apply_state(void) {

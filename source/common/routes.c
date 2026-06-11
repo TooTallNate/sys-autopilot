@@ -1,6 +1,9 @@
 #include "routes.h"
+#include "apiargs.h"
 #include "files.h"
 #include "input.h"
+#include "json.h"
+#include "mcp.h"
 #include "screen.h"
 #include "log.h"
 
@@ -9,12 +12,51 @@
 #include <string.h>
 #include <switch.h>
 
-#define APP_VERSION "1.0.0"
+#define APP_VERSION "1.1.0"
+
+// Cap for JSON request bodies on the REST input endpoints.
+#define REST_BODY_MAX 16384
 
 static u64 g_boot_tick;
 
 __attribute__((constructor)) static void init_boot_tick(void) {
     g_boot_tick = armGetSystemTick();
+}
+
+const char *routes_app_version(void) {
+    return APP_VERSION;
+}
+
+u64 routes_uptime_seconds(void) {
+    return armTicksToNs(armGetSystemTick() - g_boot_tick) / 1000000000ULL;
+}
+
+// Reads and parses a JSON request body into *doc. An absent/empty body parses
+// as an empty object. Returns the root token index, or -1 after sending an
+// error response.
+static int read_json_body(HttpRequest *req, JsonDoc *doc) {
+    static char body[REST_BODY_MAX + 1];
+    size_t total = 0;
+
+    if (req->has_content_length && req->content_length > REST_BODY_MAX) {
+        http_send_error(req->fd, 413, "request body too large");
+        return -1;
+    }
+    ssize_t n;
+    while (total < REST_BODY_MAX &&
+           (n = http_read_body(req, body + total, REST_BODY_MAX - total)) > 0)
+        total += (size_t)n;
+
+    if (total == 0) {
+        strcpy(body, "{}");
+        total = 2;
+    }
+    if (json_parse(doc, body, total) != 0 || doc->ntok < 1 ||
+        doc->tok[0].type != JSMN_OBJECT) {
+        http_send_error(req->fd, 400, "request body must be a JSON object");
+        return -1;
+    }
+    return 0; // root token
 }
 
 // --- /screenshot -------------------------------------------------------------
@@ -41,26 +83,6 @@ static void handle_screenshot(HttpRequest *req) {
 
 // --- /input/* ----------------------------------------------------------------
 
-static bool get_buttons_param(HttpRequest *req, u64 *mask) {
-    char val[256];
-    if (!http_query_get(req, "buttons", val, sizeof(val)) || val[0] == '\0') {
-        http_send_error(req->fd, 400, "missing 'buttons' query parameter");
-        return false;
-    }
-    if (!input_parse_buttons(val, mask)) {
-        http_send_error(req->fd, 400, "unknown button name in 'buttons'");
-        return false;
-    }
-    return true;
-}
-
-static int get_duration_param(HttpRequest *req, int fallback) {
-    char val[32];
-    if (http_query_get(req, "durationMs", val, sizeof(val)))
-        return atoi(val);
-    return fallback;
-}
-
 static void send_input_result(HttpRequest *req, Result rc) {
     if (R_FAILED(rc))
         http_send_json(req->fd, 500, "{\"error\":\"input failed\",\"rc\":\"0x%x\"}", rc);
@@ -69,46 +91,49 @@ static void send_input_result(HttpRequest *req, Result rc) {
 }
 
 static void handle_input_tap(HttpRequest *req) {
-    u64 mask;
-    if (!get_buttons_param(req, &mask))
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
         return;
-    int duration = get_duration_param(req, INPUT_DEFAULT_TAP_MS);
-    send_input_result(req, input_tap(mask, duration));
+    u64 mask;
+    const char *err = NULL;
+    if (!args_get_buttons(&doc, root, &mask, &err)) {
+        http_send_error(req->fd, 400, err);
+        return;
+    }
+    send_input_result(req, input_tap(mask, args_get_duration(&doc, root,
+                                                             INPUT_DEFAULT_TAP_MS)));
 }
 
-static void handle_input_hold(HttpRequest *req) {
-    u64 mask;
-    if (!get_buttons_param(req, &mask))
+static void handle_input_hold_release(HttpRequest *req, bool hold) {
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
         return;
-    send_input_result(req, input_hold(mask));
+    u64 mask;
+    const char *err = NULL;
+    if (!args_get_buttons(&doc, root, &mask, &err)) {
+        http_send_error(req->fd, 400, err);
+        return;
+    }
+    send_input_result(req, hold ? input_hold(mask) : input_release(mask));
 }
 
-static void handle_input_release(HttpRequest *req) {
-    u64 mask;
-    if (!get_buttons_param(req, &mask))
-        return;
-    send_input_result(req, input_release(mask));
-}
+static void handle_input_hold(HttpRequest *req)    { handle_input_hold_release(req, true); }
+static void handle_input_release(HttpRequest *req) { handle_input_hold_release(req, false); }
 
 static void handle_input_stick(HttpRequest *req) {
-    char val[32];
-    int side = -1;
-    if (http_query_get(req, "side", val, sizeof(val))) {
-        if (strcasecmp(val, "left") == 0) side = 0;
-        else if (strcasecmp(val, "right") == 0) side = 1;
-    }
-    if (side < 0) {
-        http_send_error(req->fd, 400, "missing or invalid 'side' (left|right)");
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+    int side, duration;
+    float x, y;
+    const char *err = NULL;
+    if (!args_get_stick(&doc, root, &side, &x, &y, &duration, &err)) {
+        http_send_error(req->fd, 400, err);
         return;
     }
-
-    float x = 0.0f, y = 0.0f;
-    if (http_query_get(req, "x", val, sizeof(val)))
-        x = strtof(val, NULL);
-    if (http_query_get(req, "y", val, sizeof(val)))
-        y = strtof(val, NULL);
-    int duration = get_duration_param(req, 0);
-
     send_input_result(req, input_stick(side, x, y, duration));
 }
 
@@ -116,8 +141,6 @@ static void handle_input_stick(HttpRequest *req) {
 
 static void handle_status(HttpRequest *req) {
     u32 ver = hosversionGet();
-    u64 uptime_s = armTicksToNs(armGetSystemTick() - g_boot_tick) / 1000000000ULL;
-
     http_send_json(req->fd, 200,
                    "{\"version\":\"" APP_VERSION "\","
                    "\"firmware\":\"%u.%u.%u\","
@@ -125,7 +148,7 @@ static void handle_status(HttpRequest *req) {
                    "\"uptimeSeconds\":%llu}",
                    HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
                    input_is_attached() ? "true" : "false",
-                   (unsigned long long)uptime_s);
+                   (unsigned long long)routes_uptime_seconds());
 }
 
 // --- dispatch ----------------------------------------------------------------
@@ -153,6 +176,7 @@ static const Route kRoutes[] = {
     { "GET",    "/files",             files_handle_get },
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
+    { "POST",   "/mcp",               mcp_handle_post },
 };
 
 void routes_handle(HttpRequest *req) {

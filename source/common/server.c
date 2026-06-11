@@ -56,10 +56,16 @@ static void handle_connection(int fd, const Config *cfg) {
     if (!http_read_request(fd, &req))
         return;
 
-    if (config_auth_enabled(cfg) &&
-        !http_check_basic_auth(&req, cfg->username, cfg->password)) {
-        http_send_unauthorized(fd);
-        return;
+    if (config_auth_enabled(cfg)) {
+        bool basic_cfg = cfg->username[0] != '\0' && cfg->password[0] != '\0';
+        bool bearer_cfg = cfg->token[0] != '\0';
+        bool ok = (basic_cfg &&
+                   http_check_basic_auth(&req, cfg->username, cfg->password)) ||
+                  (bearer_cfg && http_check_bearer_auth(&req, cfg->token));
+        if (!ok) {
+            http_send_unauthorized(fd, basic_cfg, bearer_cfg);
+            return;
+        }
     }
 
     routes_handle(&req);

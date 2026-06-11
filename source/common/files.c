@@ -1,4 +1,5 @@
 #include "files.h"
+#include "json.h"
 #include "log.h"
 
 #include <stdio.h>
@@ -13,30 +14,62 @@
 
 static char g_io_buf[IO_BUF_SIZE];
 
-// Resolves the "path" query param into an sdmc:/ path.
-// Rejects missing params, relative paths and ".." traversal.
-static bool resolve_path(HttpRequest *req, char *out, size_t outsz) {
+bool files_resolve(const char *userpath, char *out, size_t outsz, const char **err) {
+    if (userpath == NULL || userpath[0] == '\0') {
+        *err = "missing path";
+        return false;
+    }
+    if (userpath[0] != '/') {
+        *err = "path must be absolute (start with /)";
+        return false;
+    }
+    // Reject any ".." path segment.
+    const char *p = userpath;
+    while ((p = strstr(p, "..")) != NULL) {
+        bool start_ok = (p == userpath) || p[-1] == '/';
+        bool end_ok = p[2] == '\0' || p[2] == '/';
+        if (start_ok && end_ok) {
+            *err = "path traversal not allowed";
+            return false;
+        }
+        p += 2;
+    }
+    if ((size_t)snprintf(out, outsz, FILES_ROOT "%s", userpath) >= outsz) {
+        *err = "path too long";
+        return false;
+    }
+    return true;
+}
+
+void files_mkdirs_for(const char *fspath) {
+    char tmp[768];
+    snprintf(tmp, sizeof(tmp), "%s", fspath);
+    // Skip the root prefix ("sdmc:/").
+    char *p = strchr(tmp, '/');
+    if (!p)
+        return;
+    p++;
+    for (; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            mkdir(tmp, 0777);
+            *p = '/';
+        }
+    }
+}
+
+// Resolves the "path" query param. On failure sends a 400 and returns false.
+static bool resolve_query_path(HttpRequest *req, char *out, size_t outsz) {
     char path[512];
     if (!http_query_get(req, "path", path, sizeof(path)) || path[0] == '\0') {
         http_send_error(req->fd, 400, "missing 'path' query parameter");
         return false;
     }
-    if (path[0] != '/') {
-        http_send_error(req->fd, 400, "path must be absolute (start with /)");
+    const char *err = NULL;
+    if (!files_resolve(path, out, outsz, &err)) {
+        http_send_error(req->fd, 400, err);
         return false;
     }
-    // Reject any ".." path segment.
-    const char *p = path;
-    while ((p = strstr(p, "..")) != NULL) {
-        bool start_ok = (p == path) || p[-1] == '/';
-        bool end_ok = p[2] == '\0' || p[2] == '/';
-        if (start_ok && end_ok) {
-            http_send_error(req->fd, 400, "path traversal not allowed");
-            return false;
-        }
-        p += 2;
-    }
-    snprintf(out, outsz, "sdmc:%s", path);
     return true;
 }
 
@@ -56,23 +89,6 @@ static bool buf_append(char **buf, size_t *len, size_t *cap, const char *data, s
     *len += n;
     (*buf)[*len] = '\0';
     return true;
-}
-
-// Minimal JSON string escaping for filenames.
-static void json_escape(const char *in, char *out, size_t outsz) {
-    size_t o = 0;
-    for (const char *p = in; *p && o + 7 < outsz; p++) {
-        unsigned char c = (unsigned char)*p;
-        if (c == '"' || c == '\\') {
-            out[o++] = '\\';
-            out[o++] = (char)c;
-        } else if (c < 0x20) {
-            o += (size_t)snprintf(out + o, outsz - o, "\\u%04x", c);
-        } else {
-            out[o++] = (char)c;
-        }
-    }
-    out[o] = '\0';
 }
 
 static const char *content_type_for(const char *path) {
@@ -95,11 +111,12 @@ static const char *content_type_for(const char *path) {
     return "application/octet-stream";
 }
 
-static void send_dir_listing(HttpRequest *req, const char *fspath, const char *userpath) {
+char *files_build_listing(const char *fspath, const char *userpath,
+                          size_t *out_len, const char **err) {
     DIR *dir = opendir(fspath);
     if (!dir) {
-        http_send_error(req->fd, 404, "directory not found");
-        return;
+        *err = "directory not found";
+        return NULL;
     }
 
     char *json = NULL;
@@ -108,7 +125,7 @@ static void send_dir_listing(HttpRequest *req, const char *fspath, const char *u
 
     char head[600];
     char escaped[520];
-    json_escape(userpath, escaped, sizeof(escaped));
+    json_escape(userpath, strlen(userpath), escaped, sizeof(escaped));
     int n = snprintf(head, sizeof(head), "{\"path\":\"%s\",\"entries\":[", escaped);
     ok = buf_append(&json, &len, &cap, head, (size_t)n);
 
@@ -126,7 +143,9 @@ static void send_dir_listing(HttpRequest *req, const char *fspath, const char *u
         bool have_st = stat(full, &st) == 0;
         bool is_dir = have_st && S_ISDIR(st.st_mode);
 
-        json_escape(ent->d_name, escaped, sizeof(escaped));
+        if (json_escape(ent->d_name, strlen(ent->d_name), escaped,
+                        sizeof(escaped)) == (size_t)-1)
+            continue;
 
         char entry[640];
         if (is_dir) {
@@ -149,12 +168,29 @@ static void send_dir_listing(HttpRequest *req, const char *fspath, const char *u
 
     if (!ok) {
         free(json);
-        http_send_error(req->fd, 500, "out of memory building listing");
-        return;
+        *err = "out of memory building listing";
+        return NULL;
     }
+    *out_len = len;
+    return json;
+}
 
-    http_send_response(req->fd, 200, "application/json", json, len);
-    free(json);
+bool files_delete_path(const char *fspath, const char **err) {
+    struct stat st;
+    if (stat(fspath, &st) != 0) {
+        *err = "no such file or directory";
+        return false;
+    }
+    if (S_ISDIR(st.st_mode)) {
+        if (rmdir(fspath) != 0) {
+            *err = "rmdir failed (directory not empty?)";
+            return false;
+        }
+    } else if (remove(fspath) != 0) {
+        *err = "delete failed";
+        return false;
+    }
+    return true;
 }
 
 static void send_file(HttpRequest *req, const char *fspath, const struct stat *st) {
@@ -207,13 +243,15 @@ static void send_file(HttpRequest *req, const char *fspath, const struct stat *s
 
 void files_handle_get(HttpRequest *req) {
     char fspath[768];
-    if (!resolve_path(req, fspath, sizeof(fspath)))
+    if (!resolve_query_path(req, fspath, sizeof(fspath)))
         return;
+
+    size_t rootlen = strlen(FILES_ROOT);
 
     // Trailing slash forces a directory interpretation.
     size_t plen = strlen(fspath);
-    bool want_dir = plen > 6 && fspath[plen - 1] == '/';
-    if (want_dir && plen > 7)
+    bool want_dir = plen > rootlen + 1 && fspath[plen - 1] == '/';
+    if (want_dir)
         fspath[plen - 1] = '\0'; // stat without trailing slash
 
     struct stat st;
@@ -223,7 +261,15 @@ void files_handle_get(HttpRequest *req) {
     }
 
     if (S_ISDIR(st.st_mode)) {
-        send_dir_listing(req, fspath, fspath + 5 /* skip "sdmc:" */);
+        const char *err = NULL;
+        size_t len = 0;
+        char *json = files_build_listing(fspath, fspath + rootlen, &len, &err);
+        if (!json) {
+            http_send_error(req->fd, 500, err);
+            return;
+        }
+        http_send_response(req->fd, 200, "application/json", json, len);
+        free(json);
     } else if (want_dir) {
         http_send_error(req->fd, 400, "not a directory");
     } else {
@@ -231,27 +277,9 @@ void files_handle_get(HttpRequest *req) {
     }
 }
 
-// Creates all parent directories of fspath ("sdmc:/a/b/c.txt" -> mkdir a, a/b).
-static void mkdirs_for(const char *fspath) {
-    char tmp[768];
-    snprintf(tmp, sizeof(tmp), "%s", fspath);
-    // Skip "sdmc:/"
-    char *p = strchr(tmp, '/');
-    if (!p)
-        return;
-    p++;
-    for (; *p; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            mkdir(tmp, 0777);
-            *p = '/';
-        }
-    }
-}
-
 void files_handle_put(HttpRequest *req) {
     char fspath[768];
-    if (!resolve_path(req, fspath, sizeof(fspath)))
+    if (!resolve_query_path(req, fspath, sizeof(fspath)))
         return;
 
     if (!req->has_content_length) {
@@ -259,7 +287,7 @@ void files_handle_put(HttpRequest *req) {
         return;
     }
 
-    mkdirs_for(fspath);
+    files_mkdirs_for(fspath);
 
     FILE *f = fopen(fspath, "wb");
     if (!f) {
@@ -293,31 +321,19 @@ void files_handle_put(HttpRequest *req) {
     }
 
     LOGF("files: wrote %zu bytes to %s\n", total, fspath);
-    http_send_json(req->fd, 201, "{\"written\":%zu,\"path\":\"%s\"}", total, fspath + 5);
+    http_send_json(req->fd, 201, "{\"written\":%zu,\"path\":\"%s\"}", total,
+                   fspath + strlen(FILES_ROOT));
 }
 
 void files_handle_delete(HttpRequest *req) {
     char fspath[768];
-    if (!resolve_path(req, fspath, sizeof(fspath)))
+    if (!resolve_query_path(req, fspath, sizeof(fspath)))
         return;
 
-    struct stat st;
-    if (stat(fspath, &st) != 0) {
-        http_send_error(req->fd, 404, "no such file or directory");
-        return;
-    }
-
-    int rc;
-    if (S_ISDIR(st.st_mode))
-        rc = rmdir(fspath);
-    else
-        rc = remove(fspath);
-
-    if (rc != 0) {
-        http_send_error(req->fd, 500,
-                        S_ISDIR(st.st_mode) ? "rmdir failed (directory not empty?)"
-                                            : "delete failed");
+    const char *err = NULL;
+    if (!files_delete_path(fspath, &err)) {
+        http_send_error(req->fd, err && strstr(err, "no such") ? 404 : 500, err);
         return;
     }
-    http_send_json(req->fd, 200, "{\"deleted\":\"%s\"}", fspath + 5);
+    http_send_json(req->fd, 200, "{\"deleted\":\"%s\"}", fspath + strlen(FILES_ROOT));
 }

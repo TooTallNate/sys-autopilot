@@ -24,7 +24,7 @@ TARGET		:=	sys-autopilot
 BUILD		:=	build
 SOURCES		:=	source source/common
 DATA		:=	data
-INCLUDES	:=	include
+INCLUDES	:=	include lib/jsmn
 
 # Atmosphere program (title) ID for this sysmodule.
 export TITLE_ID	:=	4200000000004150

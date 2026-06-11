@@ -17,7 +17,7 @@ TARGET		:=	sys-autopilot-app
 BUILD		:=	build
 SOURCES		:=	source ../source/common
 DATA		:=	data
-INCLUDES	:=	../source
+INCLUDES	:=	../source ../lib/jsmn
 
 APP_TITLE	:=	sys-autopilot
 APP_AUTHOR	:=	TooTallNate

@@ -15,8 +15,10 @@ static const char *kDefaultConfig =
     "; TCP port the HTTP server listens on.\n"
     "port = 4150\n"
     "\n"
-    "; Optional HTTP Basic authentication.\n"
-    "; Auth is enforced only when BOTH username and password are set.\n"
+    "; Optional authentication. Auth is enforced when EITHER a bearer token\n"
+    "; is set, or both username and password are set (HTTP Basic).\n"
+    "; Clients may then use 'Authorization: Bearer <token>' or Basic auth.\n"
+    "token =\n"
     "username =\n"
     "password =\n";
 
@@ -81,6 +83,8 @@ void config_load(Config *cfg) {
             snprintf(cfg->username, sizeof(cfg->username), "%s", val);
         } else if (strcasecmp(key, "password") == 0) {
             snprintf(cfg->password, sizeof(cfg->password), "%s", val);
+        } else if (strcasecmp(key, "token") == 0) {
+            snprintf(cfg->token, sizeof(cfg->token), "%s", val);
         }
     }
     fclose(f);
@@ -90,5 +94,6 @@ void config_load(Config *cfg) {
 }
 
 bool config_auth_enabled(const Config *cfg) {
-    return cfg->username[0] != '\0' && cfg->password[0] != '\0';
+    return cfg->token[0] != '\0' ||
+           (cfg->username[0] != '\0' && cfg->password[0] != '\0');
 }
