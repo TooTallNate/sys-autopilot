@@ -166,7 +166,7 @@ static void tokens_refresh(void) {
         tokens_load();
 }
 
-static bool tokens_append(const char *token) {
+static bool tokens_append(const char *token, const char *note) {
     FILE *f = fopen(OAUTH_TOKENS_PATH, "ab");
     if (!f)
         return false;
@@ -175,9 +175,9 @@ static bool tokens_append(const char *token) {
     if (t > 1600000000) {
         struct tm tmv;
         gmtime_r(&t, &tmv);
-        strftime(stamp, sizeof(stamp), " # issued %Y-%m-%dT%H:%M:%SZ", &tmv);
+        strftime(stamp, sizeof(stamp), " issued %Y-%m-%dT%H:%M:%SZ", &tmv);
     }
-    fprintf(f, "%s%s\n", token, stamp);
+    fprintf(f, "%s #%s %s\n", token, stamp, note ? note : "");
     fclose(f);
 
     struct stat st;
@@ -202,6 +202,15 @@ bool oauth_token_valid(const char *token) {
 void oauth_init(const Config *cfg) {
     g_cfg = cfg;
     tokens_load();
+}
+
+bool oauth_mint_token(char *out, size_t outsz, const char *note) {
+    if (outsz < TOKEN_HEX_LEN + 1)
+        return false;
+    uint8_t rnd[32];
+    fill_random(rnd, sizeof(rnd));
+    to_hex(rnd, sizeof(rnd), out);
+    return tokens_append(out, note);
 }
 
 // --- pending authorization codes ---------------------------------------------
@@ -553,11 +562,8 @@ void oauth_handle_token(HttpRequest *req) {
     }
 
     // Mint and persist the token.
-    uint8_t rnd[32];
     char token[TOKEN_HEX_LEN + 1];
-    fill_random(rnd, sizeof(rnd));
-    to_hex(rnd, sizeof(rnd), token);
-    if (!tokens_append(token)) {
+    if (!oauth_mint_token(token, sizeof(token), "via oauth login")) {
         send_oauth_error(req->fd, 500, "server_error", "failed to persist token");
         return;
     }

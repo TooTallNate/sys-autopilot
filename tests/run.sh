@@ -34,9 +34,11 @@ cc $CFLAGS -Ifake \
     -DFILES_ROOT="\"$FAKE_SD\"" \
     -DMCP_UPLOAD_TMP="\"$FAKE_SD/.upload.tmp\"" \
     -DFAKE_SD="\"$FAKE_SD\"" \
+    -DOAUTH_TOKENS_PATH="\"$FAKE_SD-mcp-tokens.txt\"" \
     -o "$OUT/test_mcp" test_mcp.c stubs.c \
     "$SRC/mcp.c" "$SRC/http.c" "$SRC/base64.c" "$SRC/json.c" "$SRC/jstream.c" \
-    "$SRC/buttons.c" "$SRC/apiargs.c" "$SRC/files.c" "$SRC/power.c"
+    "$SRC/buttons.c" "$SRC/apiargs.c" "$SRC/files.c" "$SRC/power.c" \
+    "$SRC/oauth.c" "$SRC/sha256.c" "$SRC/config.c"
 "$OUT/test_mcp"
 
 echo "ALL HOST TESTS PASSED"
