@@ -1,6 +1,8 @@
 #include "server.h"
 #include "http.h"
+#include "input.h"
 #include "oauth.h"
+#include "power.h"
 #include "routes.h"
 #include "log.h"
 
@@ -105,11 +107,41 @@ static bool retry_wait(ServerIdleCb idle) {
 
 void server_run(const Config *cfg, ServerIdleCb idle) {
     int listen_fd = -1;
+    bool suspended = false;
 
     // Let the http I/O layer drive the idle callback during transfers too.
     http_set_idle_callback(idle);
 
     for (;;) {
+        // Participate in sleep/wake transitions: all sockets must be closed
+        // and no bsd IPC may be issued between the sleep acknowledgement and
+        // the wake notification, or bsdsockets aborts and the whole console
+        // crashes on the next wake. Since this loop is the only thread doing
+        // socket I/O, nothing is in flight when we acknowledge here.
+        PowerEvent pe = power_poll();
+        if (pe == PowerEvent_Sleep) {
+            LOGF("server: power: sleeping, releasing sockets + HDLS\n");
+            if (listen_fd >= 0) {
+                close(listen_fd);
+                listen_fd = -1;
+            }
+            // Release the HDLS work buffer: holding hid transfer memory
+            // across the transition crashes the sleep sequence.
+            input_suspend();
+            suspended = true;
+            power_ack();
+        } else if (pe == PowerEvent_Wake) {
+            LOGF("server: power: awake\n");
+            power_ack();
+            suspended = false;
+        }
+        if (suspended) {
+            if (idle && !idle())
+                break;
+            svcSleepThread(100000000LL); // 100ms between power_poll checks
+            continue;
+        }
+
         if (listen_fd < 0) {
             listen_fd = create_listener(cfg->port);
             if (listen_fd < 0) {
