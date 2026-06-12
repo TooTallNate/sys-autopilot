@@ -158,6 +158,71 @@ static void send_input_tool_result(int fd, const char *id, Result rc, const char
     }
 }
 
+static int get_int_or(const JsonDoc *doc, int obj, const char *key, int fallback);
+
+// Streams a result whose content is [text, image] (the screenshot-after-input
+// case). text must not require JSON escaping (static messages only).
+static void send_tool_text_and_image(int fd, const char *id, const char *text,
+                                     const u8 *jpeg, u64 jpeg_size) {
+    static const char img_pre[] = "\"},{\"type\":\"image\",\"data\":\"";
+    static const char img_post[] = "\",\"mimeType\":\"image/jpeg\"}],\"isError\":false}";
+    char head[96];
+    int hn = snprintf(head, sizeof(head), "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":", id);
+    size_t b64len = b64_encoded_len((size_t)jpeg_size);
+    size_t total = (size_t)hn + sizeof(TEXT_PRE) - 1 + strlen(text) +
+                   sizeof(img_pre) - 1 + b64len + sizeof(img_post) - 1 + 1;
+
+    http_send_header(fd, 200, "application/json", total);
+    http_write_all(fd, head, (size_t)hn);
+    http_write_all(fd, TEXT_PRE, sizeof(TEXT_PRE) - 1);
+    http_write_all(fd, text, strlen(text));
+    http_write_all(fd, img_pre, sizeof(img_pre) - 1);
+
+    static char enc[4096];
+    for (size_t off = 0; off < jpeg_size; off += 3072) {
+        size_t chunk = jpeg_size - off > 3072 ? 3072 : (size_t)(jpeg_size - off);
+        size_t n = b64_encode(jpeg + off, chunk, enc);
+        if (!http_write_all(fd, enc, n))
+            return;
+    }
+
+    http_write_all(fd, img_post, sizeof(img_post) - 1);
+    http_write_all(fd, "}", 1);
+}
+
+// Input result with an optional trailing screenshot ({"screenshot":true} in
+// the tool arguments), saving the agent a separate screenshot round trip.
+static void send_input_result_opt_screenshot(HttpRequest *req, const char *id,
+                                             Result rc, const char *ok_msg,
+                                             const JsonDoc *doc, int args) {
+    bool want = false;
+    int tok = json_obj_get(doc, args, "screenshot");
+    if (tok >= 0)
+        json_get_bool(doc, tok, &want);
+
+    if (R_FAILED(rc) || !want) {
+        send_input_tool_result(req->fd, id, rc, ok_msg);
+        return;
+    }
+
+    int delay = get_int_or(doc, args, "screenshotDelayMs", 250);
+    if (delay < 0) delay = 0;
+    if (delay > INPUT_MAX_DURATION_MS) delay = INPUT_MAX_DURATION_MS;
+    if (delay > 0)
+        svcSleepThread((s64)delay * 1000000LL);
+
+    const u8 *jpeg = NULL;
+    u64 size = 0;
+    Result cap_rc = screen_capture_jpeg(ViLayerStack_Screenshot, &jpeg, &size);
+    if (R_FAILED(cap_rc)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%s (screenshot failed: rc=0x%x)", ok_msg, cap_rc);
+        send_tool_ok(req->fd, id, msg);
+        return;
+    }
+    send_tool_text_and_image(req->fd, id, ok_msg, jpeg, size);
+}
+
 // --- tools -----------------------------------------------------------------------
 
 static void tool_screenshot(HttpRequest *req, const char *id, const JsonDoc *doc, int args) {
@@ -213,7 +278,8 @@ static void tool_tap_buttons(HttpRequest *req, const char *id, const JsonDoc *do
         return;
     }
     int duration = args_get_duration(doc, args, INPUT_DEFAULT_TAP_MS);
-    send_input_tool_result(req->fd, id, input_tap(mask, duration), "ok");
+    send_input_result_opt_screenshot(req, id, input_tap(mask, duration), "ok",
+                                     doc, args);
 }
 
 static int get_int_or(const JsonDoc *doc, int obj, const char *key, int fallback) {
@@ -262,7 +328,7 @@ static void tool_tap_sequence(HttpRequest *req, const char *id, const JsonDoc *d
     }
     char msg[48];
     snprintf(msg, sizeof(msg), "performed %d taps", n);
-    send_tool_ok(req->fd, id, msg);
+    send_input_result_opt_screenshot(req, id, 0, msg, doc, args);
 }
 
 static void tool_hold_release(HttpRequest *req, const char *id, const JsonDoc *doc,
@@ -273,7 +339,9 @@ static void tool_hold_release(HttpRequest *req, const char *id, const JsonDoc *d
         send_tool_error(req->fd, id, err);
         return;
     }
-    send_input_tool_result(req->fd, id, hold ? input_hold(mask) : input_release(mask), "ok");
+    send_input_result_opt_screenshot(req, id,
+                                     hold ? input_hold(mask) : input_release(mask),
+                                     "ok", doc, args);
 }
 
 static void tool_set_stick(HttpRequest *req, const char *id, const JsonDoc *doc, int args) {
@@ -284,7 +352,8 @@ static void tool_set_stick(HttpRequest *req, const char *id, const JsonDoc *doc,
         send_tool_error(req->fd, id, err);
         return;
     }
-    send_input_tool_result(req->fd, id, input_stick(side, x, y, duration), "ok");
+    send_input_result_opt_screenshot(req, id, input_stick(side, x, y, duration),
+                                     "ok", doc, args);
 }
 
 static void tool_status(HttpRequest *req, const char *id) {
@@ -522,7 +591,8 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "hold_buttons") == 0)     tool_hold_release(req, id, doc, args, true);
     else if (strcmp(name, "release_buttons") == 0)  tool_hold_release(req, id, doc, args, false);
     else if (strcmp(name, "set_stick") == 0)        tool_set_stick(req, id, doc, args);
-    else if (strcmp(name, "clear_input") == 0)      send_input_tool_result(req->fd, id, input_clear(), "ok");
+    else if (strcmp(name, "clear_input") == 0)
+        send_input_result_opt_screenshot(req, id, input_clear(), "ok", doc, args);
     else if (strcmp(name, "status") == 0)           tool_status(req, id);
     else if (strcmp(name, "list_directory") == 0)   tool_list_directory(req, id, doc, args);
     else if (strcmp(name, "read_file") == 0)        tool_read_file(req, id, doc, args);

@@ -200,6 +200,28 @@ static void test_upload_and_files(void) {
     printf("upload/files ok\n");
 }
 
+static void test_input_with_screenshot(void) {
+    // Input + screenshot in a single round trip: [text, image] content.
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"tap_buttons\",\"arguments\":"
+                           "{\"buttons\":[\"A\"],\"durationMs\":1,"
+                           "\"screenshot\":true,\"screenshotDelayMs\":1}}}");
+    char expect[64];
+    size_t n = b64_encode((const uint8_t *)"FAKEJPEGDATA", 12, expect);
+    expect[n] = '\0';
+    assert(strstr(r, "\"type\":\"text\",\"text\":\"ok\""));
+    assert(strstr(r, "\"type\":\"image\""));
+    assert(strstr(r, expect));
+    assert(strstr(r, "\"isError\":false"));
+
+    // Without the flag: text only, no image block.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"tap_buttons\",\"arguments\":"
+               "{\"buttons\":[\"A\"],\"durationMs\":1}}}");
+    assert(!strstr(r, "\"type\":\"image\""));
+    printf("input+screenshot ok\n");
+}
+
 static void test_power_tools(void) {
     // Tool responds ok and schedules the action for after the response.
     const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\","
@@ -230,6 +252,7 @@ int main(void) {
     test_tap_sequence();
     test_screenshot();
     test_upload_and_files();
+    test_input_with_screenshot();
     test_power_tools();
     printf("all mcp tests passed\n");
     return 0;
