@@ -31,6 +31,12 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v6
 
+      # In container jobs the workspace is owned by the host runner user while
+      # steps run as container root; without this, git refuses repo discovery
+      # for the changesets action ("fatal: not in a git directory").
+      - name: Mark Workspace Safe for Git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
 
