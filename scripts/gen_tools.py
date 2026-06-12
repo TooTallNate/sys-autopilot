@@ -13,6 +13,15 @@ def buttons_prop():
 path_prop = {"type": "string",
              "description": "Absolute path on the SD card, e.g. /switch/myapp/log.txt"}
 
+def screenshot_props():
+    return {
+        "screenshot": {"type": "boolean",
+                       "description": ("If true, the result also includes a screenshot taken "
+                                       "after the input, saving a separate screenshot call.")},
+        "screenshotDelayMs": {"type": "integer",
+                              "description": "Delay before that screenshot in ms (lets the UI settle). Default 250."},
+    }
+
 tools = [
     {
         "name": "screenshot",
@@ -32,6 +41,7 @@ tools = [
             "buttons": buttons_prop(),
             "durationMs": {"type": "integer",
                            "description": "How long to hold before releasing, in ms. Default 100, max 10000."},
+            **screenshot_props(),
         }, "required": ["buttons"]},
     },
     {
@@ -47,18 +57,21 @@ tools = [
                          "durationMs": {"type": "integer", "description": "Hold time in ms. Default 100."},
                          "delayAfterMs": {"type": "integer", "description": "Pause after release in ms. Default 150."},
                      }, "required": ["buttons"]}},
+            **screenshot_props(),
         }, "required": ["taps"]},
     },
     {
         "name": "hold_buttons",
         "description": "Press buttons and keep them held until release_buttons or clear_input. " + BTN_DESC,
-        "inputSchema": {"type": "object", "properties": {"buttons": buttons_prop()},
+        "inputSchema": {"type": "object",
+                        "properties": {"buttons": buttons_prop(), **screenshot_props()},
                         "required": ["buttons"]},
     },
     {
         "name": "release_buttons",
         "description": "Release previously held buttons.",
-        "inputSchema": {"type": "object", "properties": {"buttons": buttons_prop()},
+        "inputSchema": {"type": "object",
+                        "properties": {"buttons": buttons_prop(), **screenshot_props()},
                         "required": ["buttons"]},
     },
     {
@@ -71,12 +84,13 @@ tools = [
             "x": {"type": "number"},
             "y": {"type": "number"},
             "durationMs": {"type": "integer", "description": "Hold time before recentering. Max 10000."},
+            **screenshot_props(),
         }, "required": ["side"]},
     },
     {
         "name": "clear_input",
         "description": "Release all held buttons and recenter both sticks.",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {"type": "object", "properties": {**screenshot_props()}},
     },
     {
         "name": "status",
