@@ -4,6 +4,7 @@
 
 #include "common/config.h"
 #include "common/input.h"
+#include "common/oauth.h"
 #include "common/server.h"
 
 // Inner heap: socket transfer memory + stdio buffers + dir listing JSON.
@@ -16,6 +17,13 @@ extern "C" {
 
 u32 __nx_applet_type = AppletType_None;
 u32 __nx_fs_num_sessions = 1;
+
+// Sysmodules must use time:s (the npdm grants it); used for the
+// "# issued <date>" stamps in the OAuth tokens file.
+u32 __nx_time_service_type = TimeServiceType_System;
+
+// Internal libnx helper that wires newlib's time() to the time service.
+void __libnx_init_time(void);
 
 void __libnx_initheap(void)
 {
@@ -73,6 +81,11 @@ void __appInit(void)
     if (R_FAILED(rc))
         diagAbortWithResult(rc);
 
+    // Optional: wall-clock time for OAuth token issuance stamps.
+    rc = timeInitialize();
+    if (R_SUCCEEDED(rc))
+        __libnx_init_time();
+
     rc = socketInitialize(&kSocketConfig);
     if (R_FAILED(rc))
         diagAbortWithResult(rc);
@@ -82,6 +95,7 @@ void __appInit(void)
 
 void __appExit(void)
 {
+    timeExit();
     socketExit();
     capsscExit();
     hiddbgExit();
@@ -101,6 +115,9 @@ int main(int argc, char* argv[])
     // Attach the HDLS work buffer; the virtual controller itself is attached
     // lazily on the first input request.
     input_init();
+
+    // OAuth state (config reference + persisted token list).
+    oauth_init(&cfg);
 
     // Blocks forever (NULL idle callback).
     server_run(&cfg, NULL);

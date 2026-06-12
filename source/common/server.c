@@ -1,5 +1,6 @@
 #include "server.h"
 #include "http.h"
+#include "oauth.h"
 #include "routes.h"
 #include "log.h"
 
@@ -46,6 +47,15 @@ static int create_listener(int port) {
     return fd;
 }
 
+// OAuth discovery, login, and token endpoints must be reachable without
+// credentials (they ARE the way to obtain credentials). CORS preflights
+// carry no Authorization header either.
+static bool path_is_public(const HttpRequest *req) {
+    return strncmp(req->path, "/.well-known/", 13) == 0 ||
+           strncmp(req->path, "/oauth/", 7) == 0 ||
+           strcmp(req->method, "OPTIONS") == 0;
+}
+
 static void handle_connection(int fd, const Config *cfg) {
     // Non-blocking I/O: the http layer waits via poll() with an inactivity
     // timeout, so a stalled client can't wedge the server, and the idle
@@ -56,14 +66,24 @@ static void handle_connection(int fd, const Config *cfg) {
     if (!http_read_request(fd, &req))
         return;
 
-    if (config_auth_enabled(cfg)) {
+    if (config_auth_enabled(cfg) && !path_is_public(&req)) {
         bool basic_cfg = cfg->username[0] != '\0' && cfg->password[0] != '\0';
-        bool bearer_cfg = cfg->token[0] != '\0';
-        bool ok = (basic_cfg &&
-                   http_check_basic_auth(&req, cfg->username, cfg->password)) ||
-                  (bearer_cfg && http_check_bearer_auth(&req, cfg->token));
+        bool ok = basic_cfg &&
+                  http_check_basic_auth(&req, cfg->username, cfg->password);
+
+        char bearer[160];
+        if (!ok && http_get_bearer(&req, bearer, sizeof(bearer))) {
+            // Static config token, or any OAuth-issued token from tokens.txt.
+            if (cfg->token[0] != '\0' && http_secure_streq(bearer, cfg->token))
+                ok = true;
+            else if (oauth_token_valid(bearer))
+                ok = true;
+        }
+
         if (!ok) {
-            http_send_unauthorized(fd, basic_cfg, bearer_cfg);
+            // Bearer is always offered: OAuth-capable clients use the
+            // resource_metadata hint to run the browser flow.
+            http_send_unauthorized(&req, basic_cfg, true);
             return;
         }
     }

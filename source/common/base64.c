@@ -33,6 +33,20 @@ size_t b64_encode(const uint8_t *in, size_t n, char *out) {
     return o;
 }
 
+size_t b64url_encode(const uint8_t *in, size_t n, char *out) {
+    size_t len = b64_encode(in, n, out);
+    size_t o = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = out[i];
+        if (c == '+') c = '-';
+        else if (c == '/') c = '_';
+        else if (c == '=') break; // strip padding
+        out[o++] = c;
+    }
+    out[o] = '\0';
+    return o;
+}
+
 static int b64_val(char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
     if (c >= 'a' && c <= 'z') return c - 'a' + 26;

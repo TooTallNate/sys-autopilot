@@ -4,6 +4,7 @@
 #include "input.h"
 #include "json.h"
 #include "mcp.h"
+#include "oauth.h"
 #include "screen.h"
 #include "log.h"
 
@@ -180,9 +181,47 @@ static const Route kRoutes[] = {
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
     { "POST",   "/mcp",               mcp_handle_post },
+    { "POST",   "/oauth/register",    oauth_handle_register },
+    { "GET",    "/oauth/authorize",   oauth_handle_authorize_get },
+    { "POST",   "/oauth/authorize",   oauth_handle_authorize_post },
+    { "POST",   "/oauth/token",       oauth_handle_token },
 };
 
+// CORS preflight: browsers send OPTIONS with no Authorization header before
+// cross-origin requests (e.g. web-based MCP clients).
+static void handle_options(HttpRequest *req) {
+    static const char hdr[] =
+        "HTTP/1.1 204 No Content\r\n"
+        "Server: sys-autopilot\r\n"
+        "Access-Control-Allow-Origin: *\r\n"
+        "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+        "Access-Control-Allow-Headers: Authorization, Content-Type, Mcp-Protocol-Version\r\n"
+        "Access-Control-Max-Age: 86400\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+    http_write_all(req->fd, hdr, sizeof(hdr) - 1);
+}
+
 void routes_handle(HttpRequest *req) {
+    if (strcmp(req->method, "OPTIONS") == 0) {
+        handle_options(req);
+        return;
+    }
+
+    // OAuth discovery documents (clients probe both the bare path and the
+    // RFC 9728 path-suffix variant, e.g. .../oauth-protected-resource/mcp).
+    if (strcmp(req->method, "GET") == 0) {
+        if (strncmp(req->path, "/.well-known/oauth-protected-resource", 38) == 0) {
+            oauth_handle_protected_resource(req);
+            return;
+        }
+        if (strncmp(req->path, "/.well-known/oauth-authorization-server", 39) == 0 ||
+            strncmp(req->path, "/.well-known/openid-configuration", 33) == 0) {
+            oauth_handle_as_metadata(req);
+            return;
+        }
+    }
+
     bool path_found = false;
     for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); i++) {
         if (strcmp(req->path, kRoutes[i].path) != 0)

@@ -17,6 +17,10 @@ static inline size_t b64_encoded_len(size_t n) {
 // padding except on the final chunk.
 size_t b64_encode(const uint8_t *in, size_t n, char *out);
 
+// Base64url (RFC 4648 §5, no padding), as used by OAuth PKCE. out must hold
+// b64_encoded_len(n) + 1; NUL-terminated. Returns chars written.
+size_t b64url_encode(const uint8_t *in, size_t n, char *out);
+
 // --- Incremental decoding ----------------------------------------------------
 
 typedef struct {

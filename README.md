@@ -59,13 +59,16 @@ port = 4150
 ; Optional authentication. Auth is enforced when EITHER a bearer token
 ; is set, or both username and password are set (HTTP Basic).
 ; Clients may then use 'Authorization: Bearer <token>' or Basic auth.
+; Setting username+password also enables the OAuth browser login flow
+; for MCP clients (see below).
 token =
 username =
 password =
 ```
 
 Changes take effect after a reboot. Note this is plain HTTP — auth protects
-against casual LAN access only.
+against casual LAN access only. OAuth-issued tokens live in
+`config/sys-autopilot/tokens.txt` next to this file.
 
 ## MCP (Model Context Protocol)
 
@@ -87,10 +90,36 @@ transport, JSON-RPC 2.0). Point any MCP client directly at the console:
 }
 ```
 
-Omit `headers` when auth is not configured. (The MCP spec's optional OAuth 2.1
-flow is intentionally not implemented — there is no TLS on a LAN sysmodule, so
-static bearer-token/Basic headers are the appropriate mechanism. Any client
-that supports custom headers works.)
+Omit `headers` when auth is not configured.
+
+### OAuth browser login (no manual headers)
+
+When `username` and `password` are set in `config.ini`, sys-autopilot also
+acts as a minimal OAuth 2.1 authorization server. MCP clients that support
+the spec's auth flow (Claude Code, etc.) need **zero manual configuration**:
+add the server URL, and on the first 401 the client discovers the OAuth
+metadata, opens your browser at a login page served by the Switch, and after
+you sign in with the config.ini credentials it receives a bearer token
+automatically.
+
+```sh
+claude mcp add --transport http switch http://<switch-ip>:4150/mcp
+# first use triggers the browser login
+```
+
+Details:
+
+- Issued tokens are **non-expiring** and stored one-per-line in
+  `sdmc:/config/sys-autopilot/tokens.txt` (with an `# issued <date>` comment).
+  Revoke a token by deleting its line — the file is re-read when it changes.
+- Implements RFC 9728 protected-resource metadata, RFC 8414 AS metadata,
+  RFC 7591 dynamic client registration, and the authorization-code grant
+  with PKCE S256 (required).
+- The static `token =` and HTTP Basic options still work for clients without
+  OAuth support.
+- Note: it's OAuth over plain HTTP on your LAN — the flow is for
+  *convenience*, not transport security. A few clients hard-require HTTPS
+  for OAuth; for those, fall back to a static token header.
 
 ### Tools
 

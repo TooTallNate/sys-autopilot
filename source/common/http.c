@@ -194,6 +194,8 @@ bool http_read_request(int fd, HttpRequest *req) {
         if (header_is(cursor, "Content-Length", &value)) {
             req->content_length = (size_t)strtoull(value, NULL, 10);
             req->has_content_length = true;
+        } else if (header_is(cursor, "Host", &value)) {
+            snprintf(req->host, sizeof(req->host), "%s", value);
         } else if (header_is(cursor, "Authorization", &value)) {
             snprintf(req->auth, sizeof(req->auth), "%s", value);
         } else if (header_is(cursor, "Expect", &value)) {
@@ -208,9 +210,9 @@ bool http_read_request(int fd, HttpRequest *req) {
          req->query[0] ? "?" : "", req->query);
     return true;
 }
-bool http_query_get(const HttpRequest *req, const char *key, char *out, size_t outsz) {
+bool http_param_get(const char *params, const char *key, char *out, size_t outsz) {
     size_t klen = strlen(key);
-    const char *p = req->query;
+    const char *p = params;
     while (*p) {
         const char *amp = strchr(p, '&');
         size_t pair_len = amp ? (size_t)(amp - p) : strlen(p);
@@ -227,6 +229,10 @@ bool http_query_get(const HttpRequest *req, const char *key, char *out, size_t o
         p = amp + 1;
     }
     return false;
+}
+
+bool http_query_get(const HttpRequest *req, const char *key, char *out, size_t outsz) {
+    return http_param_get(req->query, key, out, outsz);
 }
 
 ssize_t http_read_body(HttpRequest *req, void *buf, size_t len) {
@@ -264,7 +270,7 @@ ssize_t http_read_body(HttpRequest *req, void *buf, size_t len) {
 // --- Authentication -----------------------------------------------------------
 
 // Constant-time string comparison (length difference folds into diff).
-static bool secure_streq(const char *a, const char *b) {
+bool http_secure_streq(const char *a, const char *b) {
     size_t alen = strlen(a), blen = strlen(b);
     unsigned char diff = (unsigned char)(alen ^ blen);
     size_t max = alen > blen ? alen : blen;
@@ -289,13 +295,24 @@ bool http_check_basic_auth(const HttpRequest *req, const char *user, const char 
     if (n < 0 || (size_t)n >= sizeof(expected))
         return false;
 
-    return secure_streq(decoded, expected);
+    return http_secure_streq(decoded, expected);
 }
 
 bool http_check_bearer_auth(const HttpRequest *req, const char *token) {
     if (strncasecmp(req->auth, "Bearer ", 7) != 0)
         return false;
-    return secure_streq(req->auth + 7, token);
+    return http_secure_streq(req->auth + 7, token);
+}
+
+bool http_get_bearer(const HttpRequest *req, char *out, size_t outsz) {
+    if (strncasecmp(req->auth, "Bearer ", 7) != 0)
+        return false;
+    const char *v = req->auth + 7;
+    while (*v == ' ') v++;
+    if (*v == '\0' || strlen(v) + 1 > outsz)
+        return false;
+    snprintf(out, outsz, "%s", v);
+    return true;
 }
 
 // --- Responses ---------------------------------------------------------------
@@ -305,12 +322,27 @@ void http_send_header(int fd, int code, const char *content_type, size_t content
     int n = snprintf(hdr, sizeof(hdr),
                      "HTTP/1.1 %d %s\r\n"
                      "Server: sys-autopilot\r\n"
+                     "Access-Control-Allow-Origin: *\r\n"
                      "Content-Type: %s\r\n"
                      "Content-Length: %zu\r\n"
                      "Connection: close\r\n"
                      "\r\n",
                      code, status_reason(code), content_type, content_length);
     http_write_all(fd, hdr, (size_t)n);
+}
+
+void http_send_redirect(int fd, const char *location) {
+    char hdr[1024];
+    int n = snprintf(hdr, sizeof(hdr),
+                     "HTTP/1.1 302 Found\r\n"
+                     "Server: sys-autopilot\r\n"
+                     "Location: %s\r\n"
+                     "Content-Length: 0\r\n"
+                     "Connection: close\r\n"
+                     "\r\n",
+                     location);
+    if (n > 0 && (size_t)n < sizeof(hdr))
+        http_write_all(fd, hdr, (size_t)n);
 }
 
 void http_send_response(int fd, int code, const char *content_type, const void *body, size_t len) {
@@ -336,27 +368,38 @@ void http_send_error(int fd, int code, const char *msg) {
     http_send_json(fd, code, "{\"error\":\"%s\"}", msg);
 }
 
-void http_send_unauthorized(int fd, bool offer_basic, bool offer_bearer) {
+void http_send_unauthorized(const HttpRequest *req, bool offer_basic, bool offer_bearer) {
     const char *body = "{\"error\":\"unauthorized\"}";
-    char challenges[160];
+    char challenges[384];
     int cn = 0;
-    if (offer_bearer)
-        cn += snprintf(challenges + cn, sizeof(challenges) - (size_t)cn,
-                       "WWW-Authenticate: Bearer realm=\"sys-autopilot\"\r\n");
+    if (offer_bearer) {
+        if (req->host[0]) {
+            // Point OAuth-capable MCP clients at the protected resource
+            // metadata so they can run the browser auth flow automatically.
+            cn += snprintf(challenges + cn, sizeof(challenges) - (size_t)cn,
+                           "WWW-Authenticate: Bearer realm=\"sys-autopilot\", "
+                           "resource_metadata=\"http://%s/.well-known/oauth-protected-resource\"\r\n",
+                           req->host);
+        } else {
+            cn += snprintf(challenges + cn, sizeof(challenges) - (size_t)cn,
+                           "WWW-Authenticate: Bearer realm=\"sys-autopilot\"\r\n");
+        }
+    }
     if (offer_basic)
         cn += snprintf(challenges + cn, sizeof(challenges) - (size_t)cn,
                        "WWW-Authenticate: Basic realm=\"sys-autopilot\"\r\n");
     challenges[cn] = '\0';
-    char hdr[512];
+    char hdr[768];
     int n = snprintf(hdr, sizeof(hdr),
                      "HTTP/1.1 401 Unauthorized\r\n"
                      "Server: sys-autopilot\r\n"
+                     "Access-Control-Allow-Origin: *\r\n"
                      "%s"
                      "Content-Type: application/json\r\n"
                      "Content-Length: %zu\r\n"
                      "Connection: close\r\n"
                      "\r\n",
                      challenges, strlen(body));
-    http_write_all(fd, hdr, (size_t)n);
-    http_write_all(fd, body, strlen(body));
+    http_write_all(req->fd, hdr, (size_t)n);
+    http_write_all(req->fd, body, strlen(body));
 }

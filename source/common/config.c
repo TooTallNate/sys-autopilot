@@ -18,6 +18,8 @@ static const char *kDefaultConfig =
     "; Optional authentication. Auth is enforced when EITHER a bearer token\n"
     "; is set, or both username and password are set (HTTP Basic).\n"
     "; Clients may then use 'Authorization: Bearer <token>' or Basic auth.\n"
+    "; Username+password also enables the OAuth browser login for MCP clients;\n"
+    "; tokens issued that way are stored in tokens.txt next to this file.\n"
     "token =\n"
     "username =\n"
     "password =\n";
