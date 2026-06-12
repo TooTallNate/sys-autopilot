@@ -88,10 +88,6 @@ jobs:
         if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
         run: make dist
 
-      - name: Build Dev App (.nro)
-        if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
-        run: make -C app
-
       - name: Create Release Zip
         if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
         env:
@@ -127,6 +123,4 @@ jobs:
           name: ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           body_path: RELEASE_NOTES.md
-          files: |
-            sys-autopilot-${{ steps.version.outputs.version }}.zip
-            app/sys-autopilot-app.nro
+          files: sys-autopilot-${{ steps.version.outputs.version }}.zip
