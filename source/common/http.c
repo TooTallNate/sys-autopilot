@@ -338,13 +338,15 @@ void http_send_error(int fd, int code, const char *msg) {
 
 void http_send_unauthorized(int fd, bool offer_basic, bool offer_bearer) {
     const char *body = "{\"error\":\"unauthorized\"}";
-    char challenges[160] = "";
+    char challenges[160];
+    int cn = 0;
     if (offer_bearer)
-        strlcat(challenges, "WWW-Authenticate: Bearer realm=\"sys-autopilot\"\r\n",
-                sizeof(challenges));
+        cn += snprintf(challenges + cn, sizeof(challenges) - (size_t)cn,
+                       "WWW-Authenticate: Bearer realm=\"sys-autopilot\"\r\n");
     if (offer_basic)
-        strlcat(challenges, "WWW-Authenticate: Basic realm=\"sys-autopilot\"\r\n",
-                sizeof(challenges));
+        cn += snprintf(challenges + cn, sizeof(challenges) - (size_t)cn,
+                       "WWW-Authenticate: Basic realm=\"sys-autopilot\"\r\n");
+    challenges[cn] = '\0';
     char hdr[512];
     int n = snprintf(hdr, sizeof(hdr),
                      "HTTP/1.1 401 Unauthorized\r\n"

@@ -29,6 +29,12 @@ INCLUDES	:=	include lib/jsmn
 # Atmosphere program (title) ID for this sysmodule.
 export TITLE_ID	:=	4200000000004150
 
+# Version is managed by changesets in package.json.
+export APP_VERSION	:=	$(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' $(TOPDIR)/package.json)
+ifneq ($(strip $(APP_VERSION)),)
+DEFINES	+=	-DAPP_VERSION=\"$(APP_VERSION)\"
+endif
+
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------

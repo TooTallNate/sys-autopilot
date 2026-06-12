@@ -29,7 +29,10 @@ make -C app     # builds the dev .nro flavor (see below)
 
 ## Installing
 
-Copy the contents of `dist/` to the root of your SD card:
+Download the latest `sys-autopilot-<version>.zip` from
+[Releases](https://github.com/TooTallNate/sys-autopilot/releases) and extract
+it to the root of your SD card. Or build from source and copy the contents of
+`dist/` to the root of your SD card:
 
 ```
 atmosphere/contents/4200000000004150/exefs.nsp
@@ -222,6 +225,24 @@ tests/                 host-side test suite (./tests/run.sh)
 sys-autopilot.json     NPDM descriptor (title ID 4200000000004150,
                        services: bsd:u, caps:sc, hid:dbg, set:sys, fsp-srv)
 ```
+
+## Releases & contributing
+
+CI (GitHub Actions) runs the host test suite on every push/PR and builds the
+sysmodule inside the `devkitpro/devkita64` container, uploading the SD card
+layout as an artifact.
+
+Releases are managed with [changesets](https://github.com/changesets/changesets):
+
+```sh
+pnpm install
+pnpm changeset        # record a change + semver intent
+```
+
+When changesets land on `main`, the release workflow opens a "Version
+Packages" PR; merging it bumps `package.json` (which the Makefiles inject
+into the build as `APP_VERSION`), updates `CHANGELOG.md`, and publishes a
+GitHub Release with the SD-card zip and dev `.nro` attached.
 
 ## Notes & limitations
 

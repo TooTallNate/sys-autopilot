@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    # devkitA64 toolchain for building the sysmodule; node is layered on top
+    # for the changesets tooling.
+    container: devkitpro/devkita64:20260219
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      FORCE_COLOR: 3
+    steps:
+      # The devkitpro image is minimal; git is required for a proper
+      # checkout (changesets needs a real git repo) and zip for the
+      # release asset.
+      - name: Install git + zip
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git zip ca-certificates
+
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: "pnpm"
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Either opens/updates a "Version Packages" PR (if there are unreleased
+      # changesets), or signals that the version PR was just merged
+      # (`hasChangesets == 'false'`), in which case we proceed to build the
+      # artifacts and cut a GitHub Release below.
+      - name: Create Version PR
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          # Skip the action's built-in publish step — we handle releases
+          # ourselves so we can attach the sysmodule zip.
+          publish: "echo skip"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read Package Version
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check if Release Already Exists
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        id: check_release
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const tag = '${{ steps.version.outputs.version }}';
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              core.setOutput('exists', 'true');
+            } catch (e) {
+              if (e.status === 404) core.setOutput('exists', 'false');
+              else throw e;
+            }
+
+      - name: Build Sysmodule
+        if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
+        run: make dist
+
+      - name: Build Dev App (.nro)
+        if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
+        run: make -C app
+
+      - name: Create Release Zip
+        if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Zip of the SD card layout: extract at the root of the SD card.
+          (cd dist && zip -r "../sys-autopilot-$VERSION.zip" .)
+          unzip -l "sys-autopilot-$VERSION.zip"
+
+      - name: Extract Release Notes
+        if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Pull out the section of CHANGELOG.md for the just-released version.
+          node -e "
+            const fs = require('fs');
+            const version = process.env.VERSION;
+            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const re = new RegExp('## ' + version.replace(/\\./g, '\\\\.') + '\\\\n([\\\\s\\\\S]*?)(?=\\\\n## |$)');
+            const match = changelog.match(re);
+            const body = match ? match[1].trim() : '';
+            fs.writeFileSync('RELEASE_NOTES.md', body);
+          "
+          echo "Release notes:"
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        if: steps.changesets.outputs.hasChangesets == 'false' && steps.check_release.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            sys-autopilot-${{ steps.version.outputs.version }}.zip
+            app/sys-autopilot-app.nro

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "!*"
+  pull_request:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+
+      - name: Run Host Test Suite
+        run: ./tests/run.sh
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    container: devkitpro/devkita64:20260219
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v6
+
+      - name: Build Sysmodule
+        run: make
+
+      - name: Build Dev App (.nro)
+        run: make -C app
+
+      - name: Assemble SD Card Layout
+        run: make dist
+
+      - name: Upload SD Card Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sys-autopilot
+          path: dist/
+
+      - name: Upload Dev App Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sys-autopilot-app.nro
+          path: app/sys-autopilot-app.nro

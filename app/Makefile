@@ -21,7 +21,9 @@ INCLUDES	:=	../source ../lib/jsmn
 
 APP_TITLE	:=	sys-autopilot
 APP_AUTHOR	:=	TooTallNate
-APP_VERSION	:=	1.0.0
+
+# Version is managed by changesets in package.json.
+APP_VERSION	:=	$(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' $(TOPDIR)/../package.json)
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -29,6 +31,9 @@ APP_VERSION	:=	1.0.0
 ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
 
 DEFINES	:=	-DENABLE_LOG
+ifneq ($(strip $(APP_VERSION)),)
+DEFINES	+=	-DAPP_VERSION=\"$(APP_VERSION)\"
+endif
 
 CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 			$(ARCH) $(DEFINES)

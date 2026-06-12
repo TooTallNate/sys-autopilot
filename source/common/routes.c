@@ -12,7 +12,10 @@
 #include <string.h>
 #include <switch.h>
 
-#define APP_VERSION "1.1.0"
+// Injected by the Makefile from package.json (the changesets-managed version).
+#ifndef APP_VERSION
+#define APP_VERSION "0.0.0-dev"
+#endif
 
 // Cap for JSON request bodies on the REST input endpoints.
 #define REST_BODY_MAX 16384
