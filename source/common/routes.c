@@ -5,6 +5,7 @@
 #include "json.h"
 #include "mcp.h"
 #include "oauth.h"
+#include "power.h"
 #include "screen.h"
 #include "log.h"
 
@@ -155,6 +156,32 @@ static void handle_status(HttpRequest *req) {
                    (unsigned long long)routes_uptime_seconds());
 }
 
+// --- /power/* ------------------------------------------------------------------
+
+static void handle_power(HttpRequest *req, PowerAction action, const char *note) {
+    if (!power_actions_available()) {
+        http_send_error(req->fd, 500, "power control unavailable");
+        return;
+    }
+    http_send_json(req->fd, 200, "{\"ok\":true,\"note\":\"%s\"}", note);
+    power_schedule(action); // executed after this response is flushed
+}
+
+static void handle_power_sleep(HttpRequest *req) {
+    handle_power(req, PowerAction_Sleep,
+                 "entering sleep; server unreachable until console is woken physically");
+}
+
+static void handle_power_restart(HttpRequest *req) {
+    handle_power(req, PowerAction_Restart,
+                 "rebooting; server returns after the console boots back into CFW (bootloader menus may require manual intervention)");
+}
+
+static void handle_power_off(HttpRequest *req) {
+    handle_power(req, PowerAction_PowerOff,
+                 "powering off; physical power button required to turn back on");
+}
+
 // --- dispatch ----------------------------------------------------------------
 
 typedef struct {
@@ -181,6 +208,9 @@ static const Route kRoutes[] = {
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
     { "POST",   "/mcp",               mcp_handle_post },
+    { "POST",   "/power/sleep",       handle_power_sleep },
+    { "POST",   "/power/restart",     handle_power_restart },
+    { "POST",   "/power/off",         handle_power_off },
     { "POST",   "/oauth/register",    oauth_handle_register },
     { "GET",    "/oauth/authorize",   oauth_handle_authorize_get },
     { "POST",   "/oauth/authorize",   oauth_handle_authorize_post },

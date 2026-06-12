@@ -36,7 +36,7 @@ cc $CFLAGS -Ifake \
     -DFAKE_SD="\"$FAKE_SD\"" \
     -o "$OUT/test_mcp" test_mcp.c stubs.c \
     "$SRC/mcp.c" "$SRC/http.c" "$SRC/base64.c" "$SRC/json.c" "$SRC/jstream.c" \
-    "$SRC/buttons.c" "$SRC/apiargs.c" "$SRC/files.c"
+    "$SRC/buttons.c" "$SRC/apiargs.c" "$SRC/files.c" "$SRC/power.c"
 "$OUT/test_mcp"
 
 echo "ALL HOST TESTS PASSED"

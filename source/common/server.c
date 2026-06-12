@@ -182,6 +182,19 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
 
         handle_connection(client, cfg);
         close(client);
+
+        // Agent-requested power action: executed only after the response has
+        // been sent and the connection closed, so the client gets its
+        // confirmation before the console goes away.
+        PowerAction act = power_take_scheduled();
+        if (act != PowerAction_None) {
+            LOGF("server: executing power action %d\n", act);
+            svcSleepThread(200000000LL); // 200ms: let the response flush
+            if (!power_perform(act))
+                LOGF("server: power action failed\n");
+            // For sleep, the PSC ReadySleep event arrives on a subsequent
+            // iteration and quiesces sockets/HDLS as usual.
+        }
     }
 
     http_set_idle_callback(NULL);

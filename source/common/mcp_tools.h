@@ -54,4 +54,14 @@ static const char kMcpToolsJson[] =
     "d file content.\"}},\"required\":[\"path\",\"content\"]}},{\"name\":\"delete_file\",\"description\":\"Delete a fil"
     "e or empty directory on the SD card.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"s"
     "tring\",\"description\":\"Absolute path on the SD card, e.g. /switch/myapp/log.txt\"}},\"required\":[\"path\""
-    "]}}]}";
+    "]}},{\"name\":\"sleep\",\"description\":\"Put the console into sleep mode. WARNING: the server becomes unre"
+    "achable immediately and CANNOT be woken remotely - a human must physically press a button on the con"
+    "sole or a paired controller to wake it. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"o"
+    "bject\",\"properties\":{}}},{\"name\":\"restart\",\"description\":\"Reboot the console. WARNING: the server go"
+    "es down immediately, and whether it returns without human help depends on the bootloader: setups tha"
+    "t boot into a menu (e.g. Hekate without autoboot) require someone to manually re-launch the firmware"
+    ". In-memory state (held buttons, virtual controller) is lost. Only use when explicitly asked to.\",\"i"
+    "nputSchema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"power_off\",\"description\":\"Fully power off th"
+    "e console. WARNING: the server becomes permanently unreachable - a human must physically press the p"
+    "ower button to turn the console back on. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\""
+    "object\",\"properties\":{}}}]}";

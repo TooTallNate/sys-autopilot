@@ -5,6 +5,7 @@
 #include "files.h"
 #include "input.h"
 #include "json.h"
+#include "power.h"
 #include "jstream.h"
 #include "routes.h"
 #include "screen.h"
@@ -471,6 +472,16 @@ static void tool_delete_file(HttpRequest *req, const char *id, const JsonDoc *do
     send_tool_ok(req->fd, id, "deleted");
 }
 
+static void tool_power(HttpRequest *req, const char *id, PowerAction action,
+                       const char *ok_msg) {
+    if (!power_actions_available()) {
+        send_tool_error(req->fd, id, "power control unavailable");
+        return;
+    }
+    send_tool_ok(req->fd, id, ok_msg);
+    power_schedule(action); // executed after this response is flushed
+}
+
 // --- JSON-RPC dispatch -------------------------------------------------------
 
 static void handle_initialize(HttpRequest *req, const char *id, const JsonDoc *doc, int params) {
@@ -517,6 +528,18 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "read_file") == 0)        tool_read_file(req, id, doc, args);
     else if (strcmp(name, "upload_file") == 0)      tool_upload_file(req, id, doc, args, content_streamed);
     else if (strcmp(name, "delete_file") == 0)      tool_delete_file(req, id, doc, args);
+    else if (strcmp(name, "sleep") == 0)
+        tool_power(req, id, PowerAction_Sleep,
+                   "entering sleep mode; the server will be unreachable until "
+                   "a human wakes the console");
+    else if (strcmp(name, "restart") == 0)
+        tool_power(req, id, PowerAction_Restart,
+                   "rebooting; the server returns once the console boots back "
+                   "into CFW (bootloader menus may require human intervention)");
+    else if (strcmp(name, "power_off") == 0)
+        tool_power(req, id, PowerAction_PowerOff,
+                   "powering off; a human must press the power button to turn "
+                   "the console back on");
     else send_rpc_error(req->fd, id, -32602, "unknown tool");
 }
 

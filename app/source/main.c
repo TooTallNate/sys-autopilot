@@ -53,6 +53,8 @@ int main(int argc, char* argv[])
     // sysmodule does.
     if (!power_init())
         printf("power_init() unavailable (running without sleep handling)\n");
+    if (!power_spsm_init())
+        printf("spsm unavailable (power tools disabled)\n");
 
     struct in_addr addr = { .s_addr = gethostid() };
     printf("sys-autopilot (dev app)\n");
