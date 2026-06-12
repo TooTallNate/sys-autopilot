@@ -174,7 +174,7 @@ static void handle_power_sleep(HttpRequest *req) {
 
 static void handle_power_restart(HttpRequest *req) {
     handle_power(req, PowerAction_Restart,
-                 "rebooting; server returns automatically after boot");
+                 "rebooting; server returns after the console boots back into CFW (bootloader menus may require manual intervention)");
 }
 
 static void handle_power_off(HttpRequest *req) {

@@ -7,4 +7,5 @@ Add `sleep`, `restart`, and `power_off` MCP tools (and matching
 console power state. Actions execute only after the confirmation
 response has been delivered; tool descriptions carry explicit warnings
 about server availability (sleep and power-off require physical human
-interaction to recover).
+interaction to recover; restart may too, depending on bootloader
+autoboot configuration).

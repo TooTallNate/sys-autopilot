@@ -58,9 +58,10 @@ static const char kMcpToolsJson[] =
     "achable immediately and CANNOT be woken remotely - a human must physically press a button on the con"
     "sole or a paired controller to wake it. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"o"
     "bject\",\"properties\":{}}},{\"name\":\"restart\",\"description\":\"Reboot the console. WARNING: the server go"
-    "es down immediately; it returns automatically once the console finishes booting (roughly 30-60 secon"
-    "ds). In-memory state (held buttons, virtual controller) is lost. Only use when explicitly asked to.\""
-    ",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"power_off\",\"description\":\"Fully power off"
-    " the console. WARNING: the server becomes permanently unreachable - a human must physically press th"
-    "e power button to turn the console back on. Only use when explicitly asked to.\",\"inputSchema\":{\"type"
-    "\":\"object\",\"properties\":{}}}]}";
+    "es down immediately, and whether it returns without human help depends on the bootloader: setups tha"
+    "t boot into a menu (e.g. Hekate without autoboot) require someone to manually re-launch the firmware"
+    ". In-memory state (held buttons, virtual controller) is lost. Only use when explicitly asked to.\",\"i"
+    "nputSchema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"power_off\",\"description\":\"Fully power off th"
+    "e console. WARNING: the server becomes permanently unreachable - a human must physically press the p"
+    "ower button to turn the console back on. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\""
+    "object\",\"properties\":{}}}]}";

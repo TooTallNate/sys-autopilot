@@ -126,10 +126,12 @@ tools = [
     },
     {
         "name": "restart",
-        "description": ("Reboot the console. WARNING: the server goes down immediately; it "
-                        "returns automatically once the console finishes booting (roughly "
-                        "30-60 seconds). In-memory state (held buttons, virtual controller) "
-                        "is lost. Only use when explicitly asked to."),
+        "description": ("Reboot the console. WARNING: the server goes down immediately, and "
+                        "whether it returns without human help depends on the bootloader: "
+                        "setups that boot into a menu (e.g. Hekate without autoboot) require "
+                        "someone to manually re-launch the firmware. In-memory state (held "
+                        "buttons, virtual controller) is lost. Only use when explicitly "
+                        "asked to."),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
