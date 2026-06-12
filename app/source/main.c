@@ -7,6 +7,7 @@
 #include "common/config.h"
 #include "common/input.h"
 #include "common/oauth.h"
+#include "common/power.h"
 #include "common/server.h"
 
 static PadState g_pad;
@@ -45,11 +46,13 @@ int main(int argc, char* argv[])
     Config cfg;
     config_load(&cfg);
 
-    rc = input_init();
-    if (R_FAILED(rc))
-        printf("input_init() failed: 0x%x\n", rc);
-
     oauth_init(&cfg);
+
+    // Best-effort: applets are suspended during sleep anyway, but register
+    // with PSC when available so the loop quiesces sockets like the
+    // sysmodule does.
+    if (!power_init())
+        printf("power_init() unavailable (running without sleep handling)\n");
 
     struct in_addr addr = { .s_addr = gethostid() };
     printf("sys-autopilot (dev app)\n");

@@ -5,6 +5,7 @@
 #include "common/config.h"
 #include "common/input.h"
 #include "common/oauth.h"
+#include "common/power.h"
 #include "common/server.h"
 
 // Inner heap: socket transfer memory + stdio buffers + dir listing JSON.
@@ -90,11 +91,18 @@ void __appInit(void)
     if (R_FAILED(rc))
         diagAbortWithResult(rc);
 
+    // Register with PSC so we can quiesce sockets across sleep (must happen
+    // while the sm session is open). Failure is non-fatal but means sleep
+    // will crash the console, so abort loudly in that case.
+    if (!power_init())
+        diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_NotFound));
+
     smExit();
 }
 
 void __appExit(void)
 {
+    power_exit();
     timeExit();
     socketExit();
     capsscExit();
@@ -111,10 +119,6 @@ int main(int argc, char* argv[])
 {
     Config cfg;
     config_load(&cfg);
-
-    // Attach the HDLS work buffer; the virtual controller itself is attached
-    // lazily on the first input request.
-    input_init();
 
     // OAuth state (config reference + persisted token list).
     oauth_init(&cfg);

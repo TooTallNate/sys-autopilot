@@ -31,34 +31,46 @@ static u8 g_workmem[0x1000] __attribute__((aligned(0x1000)));
 static HiddbgHdlsSessionId g_session_id;
 static HiddbgHdlsHandle g_handle;
 static HiddbgHdlsState g_state;
-static bool g_initialized;
+static bool g_workbuf_attached;
 static bool g_attached;
 
-Result input_init(void) {
+// The HDLS work buffer is transfer memory mapped into the hid sysmodule.
+// It is attached lazily (first input request) and MUST be released across
+// sleep: holding it during a sleep transition breaks hid's own power
+// handling and crashes the console (omm aborts with psc error 2165-1001).
+static Result ensure_workbuf(void) {
+    if (g_workbuf_attached)
+        return 0;
     Result rc = hiddbgAttachHdlsWorkBuffer(&g_session_id, g_workmem, sizeof(g_workmem));
     if (R_FAILED(rc)) {
         LOGF("input: hiddbgAttachHdlsWorkBuffer failed rc=0x%x\n", rc);
         return rc;
     }
-    g_initialized = true;
-
-    memset(&g_state, 0, sizeof(g_state));
-    g_state.battery_level = 4; // full
+    g_workbuf_attached = true;
     return 0;
 }
 
+void input_suspend(void) {
+    if (g_attached) {
+        hiddbgDetachHdlsVirtualDevice(g_handle);
+        g_attached = false;
+    }
+    if (g_workbuf_attached) {
+        hiddbgReleaseHdlsWorkBuffer(g_session_id);
+        g_workbuf_attached = false;
+    }
+    memset(&g_state, 0, sizeof(g_state));
+    g_state.battery_level = 4;
+}
+
 void input_exit(void) {
-    if (!g_initialized)
-        return;
-    if (g_attached)
-        input_detach();
-    hiddbgReleaseHdlsWorkBuffer(g_session_id);
-    g_initialized = false;
+    input_suspend();
 }
 
 Result input_attach(void) {
-    if (!g_initialized)
-        return MAKERESULT(Module_Libnx, LibnxError_NotInitialized);
+    Result rc = ensure_workbuf();
+    if (R_FAILED(rc))
+        return rc;
     if (g_attached)
         return 0;
 
@@ -70,7 +82,7 @@ Result input_attach(void) {
     device.colorLeftGrip = RGBA8_MAXALPHA(60, 60, 230);
     device.colorRightGrip = RGBA8_MAXALPHA(230, 60, 60);
 
-    Result rc = hiddbgAttachHdlsVirtualDevice(&g_handle, &device);
+    rc = hiddbgAttachHdlsVirtualDevice(&g_handle, &device);
     if (R_FAILED(rc)) {
         LOGF("input: hiddbgAttachHdlsVirtualDevice failed rc=0x%x\n", rc);
         return rc;

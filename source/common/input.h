@@ -5,10 +5,13 @@
 #define INPUT_DEFAULT_TAP_MS 100
 #define INPUT_MAX_DURATION_MS 10000
 
-// Attaches the HDLS work buffer. Call once at startup (after hiddbgInitialize).
-Result input_init(void);
+// Detaches the virtual device and releases the HDLS work buffer. MUST be
+// called when the console prepares for sleep (holding the work buffer
+// across a sleep transition crashes the console); everything re-attaches
+// lazily on the next input request.
+void input_suspend(void);
 
-// Detaches virtual device + work buffer. Call before hiddbgExit.
+// Alias of input_suspend for shutdown paths. Call before hiddbgExit.
 void input_exit(void);
 
 // Attach/detach the virtual Pro Controller.
