@@ -97,11 +97,16 @@ void __appInit(void)
     if (!power_init())
         diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_NotFound));
 
+    // For agent-requested sleep/restart/power-off. Non-fatal when missing:
+    // the endpoints report unavailability.
+    power_spsm_init();
+
     smExit();
 }
 
 void __appExit(void)
 {
+    power_spsm_exit();
     power_exit();
     timeExit();
     socketExit();

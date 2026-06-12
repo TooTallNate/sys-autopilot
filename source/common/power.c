@@ -1,6 +1,19 @@
 #include "power.h"
 #include "log.h"
 
+// Scheduling is pure (host-testable); execution is Switch-only below.
+static PowerAction g_scheduled;
+
+void power_schedule(PowerAction action) {
+    g_scheduled = action;
+}
+
+PowerAction power_take_scheduled(void) {
+    PowerAction a = g_scheduled;
+    g_scheduled = PowerAction_None;
+    return a;
+}
+
 #ifdef __SWITCH__
 
 #include <switch.h>
@@ -77,11 +90,76 @@ void power_exit(void) {
     g_initialized = false;
 }
 
-#else // host (tests): no PSC
+static bool g_spsm_ok;
+
+bool power_spsm_init(void) {
+    Result rc = spsmInitialize();
+    if (R_FAILED(rc)) {
+        LOGF("power: spsmInitialize failed rc=0x%x\n", rc);
+        return false;
+    }
+    g_spsm_ok = true;
+    return true;
+}
+
+void power_spsm_exit(void) {
+    if (g_spsm_ok) {
+        spsmExit();
+        g_spsm_ok = false;
+    }
+}
+
+bool power_actions_available(void) {
+    return g_spsm_ok;
+}
+
+bool power_perform(PowerAction action) {
+    if (!g_spsm_ok)
+        return false;
+    Result rc;
+    switch (action) {
+        case PowerAction_Sleep: {
+            // spsm cmd 1 SleepSystemAndWaitAwake: returns an event handle
+            // immediately and kicks off the sleep sequence; PSC then walks
+            // us through the transition like any other sleep.
+            Handle h = INVALID_HANDLE;
+            rc = serviceDispatch(spsmGetServiceSession(), 1,
+                                 .out_handle_attrs = { SfOutHandleAttr_HipcCopy },
+                                 .out_handles = &h);
+            if (R_SUCCEEDED(rc) && h != INVALID_HANDLE)
+                svcCloseHandle(h);
+            break;
+        }
+        case PowerAction_Restart:
+            rc = spsmShutdown(true);
+            break;
+        case PowerAction_PowerOff:
+            rc = spsmShutdown(false);
+            break;
+        default:
+            return false;
+    }
+    if (R_FAILED(rc))
+        LOGF("power: action %d failed rc=0x%x\n", action, rc);
+    return R_SUCCEEDED(rc);
+}
+
+#else // host (tests): no PSC / spsm
+
+static PowerAction g_last_performed;
 
 bool power_init(void) { return false; }
 PowerEvent power_poll(void) { return PowerEvent_None; }
 void power_ack(void) {}
 void power_exit(void) {}
+
+bool power_spsm_init(void) { return false; }
+void power_spsm_exit(void) {}
+bool power_actions_available(void) { return true; } // tools testable on host
+
+bool power_perform(PowerAction action) {
+    g_last_performed = action;
+    return true;
+}
 
 #endif

@@ -14,7 +14,7 @@
 	"filesystem_access":	{
 		"permissions":	"0xffffffffffffffff"
 	},
-	"service_access":	["bsd:u", "caps:sc", "hid:dbg", "set:sys", "fsp-srv", "time:s", "psc:m"],
+	"service_access":	["bsd:u", "caps:sc", "hid:dbg", "set:sys", "fsp-srv", "time:s", "psc:m", "spsm"],
 	"service_host":	[],
 	"kernel_capabilities":	[{
 			"type":	"kernel_flags",

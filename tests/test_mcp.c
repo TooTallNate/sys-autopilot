@@ -12,6 +12,7 @@
 #include "buttons.h"
 #include "http.h"
 #include "mcp.h"
+#include "power.h"
 
 extern uint64_t stub_tap_mask;
 extern int stub_tap_duration;
@@ -199,6 +200,27 @@ static void test_upload_and_files(void) {
     printf("upload/files ok\n");
 }
 
+static void test_power_tools(void) {
+    // Tool responds ok and schedules the action for after the response.
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"sleep\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "unreachable"));
+    assert(power_take_scheduled() == PowerAction_Sleep);
+    assert(power_take_scheduled() == PowerAction_None); // consumed
+
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"restart\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(power_take_scheduled() == PowerAction_Restart);
+
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"power_off\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(power_take_scheduled() == PowerAction_PowerOff);
+    printf("power tools ok\n");
+}
+
 int main(void) {
     test_initialize();
     test_notification();
@@ -208,6 +230,7 @@ int main(void) {
     test_tap_sequence();
     test_screenshot();
     test_upload_and_files();
+    test_power_tools();
     printf("all mcp tests passed\n");
     return 0;
 }
