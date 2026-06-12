@@ -604,8 +604,8 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
                    "a human wakes the console");
     else if (strcmp(name, "restart") == 0)
         tool_power(req, id, PowerAction_Restart,
-                   "rebooting; the server will return automatically in about "
-                   "30-60 seconds");
+                   "rebooting; the server returns once the console boots back "
+                   "into CFW (bootloader menus may require human intervention)");
     else if (strcmp(name, "power_off") == 0)
         tool_power(req, id, PowerAction_PowerOff,
                    "powering off; a human must press the power button to turn "

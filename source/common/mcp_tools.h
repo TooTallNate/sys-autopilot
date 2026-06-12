@@ -74,9 +74,10 @@ static const char kMcpToolsJson[] =
     ":\"Put the console into sleep mode. WARNING: the server becomes unreachable immediately and CANNOT be"
     " woken remotely - a human must physically press a button on the console or a paired controller to wa"
     "ke it. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":"
-    "\"restart\",\"description\":\"Reboot the console. WARNING: the server goes down immediately; it returns a"
-    "utomatically once the console finishes booting (roughly 30-60 seconds). In-memory state (held button"
-    "s, virtual controller) is lost. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"object\",\""
-    "properties\":{}}},{\"name\":\"power_off\",\"description\":\"Fully power off the console. WARNING: the server"
-    " becomes permanently unreachable - a human must physically press the power button to turn the consol"
-    "e back on. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}";
+    "\"restart\",\"description\":\"Reboot the console. WARNING: the server goes down immediately, and whether "
+    "it returns without human help depends on the bootloader: setups that boot into a menu (e.g. Hekate w"
+    "ithout autoboot) require someone to manually re-launch the firmware. In-memory state (held buttons, "
+    "virtual controller) is lost. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"object\",\"pro"
+    "perties\":{}}},{\"name\":\"power_off\",\"description\":\"Fully power off the console. WARNING: the server be"
+    "comes permanently unreachable - a human must physically press the power button to turn the console b"
+    "ack on. Only use when explicitly asked to.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}";
