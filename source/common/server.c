@@ -71,6 +71,18 @@ static void handle_connection(int fd, const Config *cfg) {
     routes_handle(&req);
 }
 
+// Sleeps ~1s in 100ms slices, invoking the idle callback each slice so the
+// dev app stays responsive (input is sampled per idle call; a long sleep
+// would make button presses easy to miss). Returns false on idle shutdown.
+static bool retry_wait(ServerIdleCb idle) {
+    for (int i = 0; i < 10; i++) {
+        if (idle && !idle())
+            return false;
+        svcSleepThread(100000000LL); // 100ms
+    }
+    return true;
+}
+
 void server_run(const Config *cfg, ServerIdleCb idle) {
     int listen_fd = -1;
 
@@ -83,9 +95,8 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             if (listen_fd < 0) {
                 LOGF("server: bind/listen on port %d failed (errno=%d), retrying\n",
                      cfg->port, errno);
-                if (idle && !idle())
+                if (!retry_wait(idle))
                     return;
-                svcSleepThread(1000000000LL); // 1s
                 continue;
             }
             LOGF("server: listening on port %d\n", cfg->port);
@@ -102,7 +113,8 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             LOGF("server: poll failed (errno=%d), rebuilding listener\n", errno);
             close(listen_fd);
             listen_fd = -1;
-            svcSleepThread(1000000000LL);
+            if (!retry_wait(idle))
+                break;
             continue;
         }
         if (pr == 0 || !(pfd.revents & POLLIN))
