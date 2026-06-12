@@ -566,6 +566,24 @@ static void tool_create_token(HttpRequest *req, const char *id) {
     send_tool_ok(req->fd, id, text);
 }
 
+static void tool_revoke_token(HttpRequest *req, const char *id,
+                              const JsonDoc *doc, int args) {
+    char token[160];
+    int tok = json_obj_get(doc, args, "token");
+    if (tok < 0 || !json_get_string(doc, tok, token, sizeof(token))) {
+        send_tool_error(req->fd, id, "missing 'token'");
+        return;
+    }
+    if (!oauth_revoke_token(token)) {
+        send_tool_error(req->fd, id,
+                        "unknown token (note: the static config.ini token "
+                        "cannot be revoked this way)");
+        return;
+    }
+    LOGF("mcp: revoked a token\n");
+    send_tool_ok(req->fd, id, "token revoked");
+}
+
 static void tool_power(HttpRequest *req, const char *id, PowerAction action,
                        const char *ok_msg) {
     if (!power_actions_available()) {
@@ -624,6 +642,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "upload_file") == 0)      tool_upload_file(req, id, doc, args, content_streamed);
     else if (strcmp(name, "delete_file") == 0)      tool_delete_file(req, id, doc, args);
     else if (strcmp(name, "create_token") == 0)     tool_create_token(req, id);
+    else if (strcmp(name, "revoke_token") == 0)     tool_revoke_token(req, id, doc, args);
     else if (strcmp(name, "sleep") == 0)
         tool_power(req, id, PowerAction_Sleep,
                    "entering sleep mode; the server will be unreachable until "

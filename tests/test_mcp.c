@@ -255,6 +255,27 @@ static void test_create_token(void) {
     assert(strstr(file, token));
     assert(strstr(file, "via create_token tool"));
     printf("create_token ok\n");
+
+    // Revoke it again: token stops validating and leaves the file.
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"revoke_token\",\"arguments\":{\"token\":\"%s\"}}}",
+             token);
+    r = do_rpc(body);
+    assert(strstr(r, "token revoked"));
+    assert(!oauth_token_valid(token));
+    f = fopen(OAUTH_TOKENS_PATH, "rb");
+    assert(f);
+    char file2[512] = {0};
+    fread(file2, 1, sizeof(file2) - 1, f);
+    fclose(f);
+    assert(!strstr(file2, token));
+
+    // Revoking an unknown token is an in-band tool error.
+    r = do_rpc(body);
+    assert(strstr(r, "\"isError\":true"));
+    printf("revoke_token ok\n");
 }
 
 static void test_power_tools(void) {
