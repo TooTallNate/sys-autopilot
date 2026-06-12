@@ -26,6 +26,16 @@ void oauth_init(const Config *cfg);
 // the tokens file when its mtime changes, so edits apply without a reboot.
 bool oauth_token_valid(const char *token);
 
+// Mints a fresh bearer token and persists it to OAUTH_TOKENS_PATH with the
+// given note in the comment. out must hold at least 65 chars. Used by the
+// OAuth token endpoint and by the create_token MCP tool.
+bool oauth_mint_token(char *out, size_t outsz, const char *note);
+
+// Removes a token: deletes its line from OAUTH_TOKENS_PATH and reloads the
+// store. Returns false when the token is not in the store (e.g. the static
+// config token, which lives in config.ini instead).
+bool oauth_revoke_token(const char *token);
+
 // Endpoint handlers (each sends a complete HTTP response).
 void oauth_handle_protected_resource(HttpRequest *req); // GET well-known
 void oauth_handle_as_metadata(HttpRequest *req);        // GET well-known

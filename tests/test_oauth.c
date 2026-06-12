@@ -26,6 +26,12 @@ static const char *do_req(Handler handler, const char *method, const char *targe
     static char resp[64 * 1024];
     int sv[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    // The handler writes the entire response before the test reads it back;
+    // grow the buffers so large payloads (tools/list, screenshots) don't
+    // deadlock the single-threaded harness.
+    int bufsz = 512 * 1024;
+    setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz));
+    setsockopt(sv[1], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz));
 
     char req[8192];
     int rn;

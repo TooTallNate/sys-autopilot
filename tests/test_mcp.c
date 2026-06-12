@@ -10,8 +10,10 @@
 
 #include "base64.h"
 #include "buttons.h"
+#include "config.h"
 #include "http.h"
 #include "mcp.h"
+#include "oauth.h"
 #include "power.h"
 
 extern uint64_t stub_tap_mask;
@@ -24,6 +26,12 @@ static const char *do_rpc(const char *body) {
     static char resp[256 * 1024];
     int sv[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+    // The handler writes the entire response before the test reads it back;
+    // grow the buffers so large payloads (tools/list, screenshots) don't
+    // deadlock the single-threaded harness.
+    int bufsz = 512 * 1024;
+    setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &bufsz, sizeof(bufsz));
+    setsockopt(sv[1], SOL_SOCKET, SO_RCVBUF, &bufsz, sizeof(bufsz));
 
     char req[64 * 1024];
     int rn = snprintf(req, sizeof(req),
@@ -222,6 +230,54 @@ static void test_input_with_screenshot(void) {
     printf("input+screenshot ok\n");
 }
 
+static void test_create_token(void) {
+    remove(OAUTH_TOKENS_PATH);
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"create_token\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "Authorization: Bearer"));
+
+    // Extract the 64-hex token from "token: <hex>" and validate it works.
+    const char *t = strstr(r, "token: ");
+    assert(t);
+    t += 7;
+    char token[80];
+    snprintf(token, sizeof(token), "%.64s", t);
+    assert(strlen(token) == 64);
+    assert(oauth_token_valid(token));
+
+    // Persisted with the tool note.
+    FILE *f = fopen(OAUTH_TOKENS_PATH, "rb");
+    assert(f);
+    char file[512] = {0};
+    fread(file, 1, sizeof(file) - 1, f);
+    fclose(f);
+    assert(strstr(file, token));
+    assert(strstr(file, "via create_token tool"));
+    printf("create_token ok\n");
+
+    // Revoke it again: token stops validating and leaves the file.
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"revoke_token\",\"arguments\":{\"token\":\"%s\"}}}",
+             token);
+    r = do_rpc(body);
+    assert(strstr(r, "token revoked"));
+    assert(!oauth_token_valid(token));
+    f = fopen(OAUTH_TOKENS_PATH, "rb");
+    assert(f);
+    char file2[512] = {0};
+    fread(file2, 1, sizeof(file2) - 1, f);
+    fclose(f);
+    assert(!strstr(file2, token));
+
+    // Revoking an unknown token is an in-band tool error.
+    r = do_rpc(body);
+    assert(strstr(r, "\"isError\":true"));
+    printf("revoke_token ok\n");
+}
+
 static void test_power_tools(void) {
     // Tool responds ok and schedules the action for after the response.
     const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\","
@@ -243,7 +299,12 @@ static void test_power_tools(void) {
     printf("power tools ok\n");
 }
 
+static Config g_cfg_for_oauth;
+
 int main(void) {
+    snprintf(g_cfg_for_oauth.username, sizeof(g_cfg_for_oauth.username), "u");
+    snprintf(g_cfg_for_oauth.password, sizeof(g_cfg_for_oauth.password), "p");
+    oauth_init(&g_cfg_for_oauth);
     test_initialize();
     test_notification();
     test_ping_and_errors();
@@ -253,6 +314,7 @@ int main(void) {
     test_screenshot();
     test_upload_and_files();
     test_input_with_screenshot();
+    test_create_token();
     test_power_tools();
     printf("all mcp tests passed\n");
     return 0;

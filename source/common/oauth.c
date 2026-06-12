@@ -166,7 +166,7 @@ static void tokens_refresh(void) {
         tokens_load();
 }
 
-static bool tokens_append(const char *token) {
+static bool tokens_append(const char *token, const char *note) {
     FILE *f = fopen(OAUTH_TOKENS_PATH, "ab");
     if (!f)
         return false;
@@ -175,9 +175,9 @@ static bool tokens_append(const char *token) {
     if (t > 1600000000) {
         struct tm tmv;
         gmtime_r(&t, &tmv);
-        strftime(stamp, sizeof(stamp), " # issued %Y-%m-%dT%H:%M:%SZ", &tmv);
+        strftime(stamp, sizeof(stamp), " issued %Y-%m-%dT%H:%M:%SZ", &tmv);
     }
-    fprintf(f, "%s%s\n", token, stamp);
+    fprintf(f, "%s #%s %s\n", token, stamp, note ? note : "");
     fclose(f);
 
     struct stat st;
@@ -202,6 +202,56 @@ bool oauth_token_valid(const char *token) {
 void oauth_init(const Config *cfg) {
     g_cfg = cfg;
     tokens_load();
+}
+
+bool oauth_revoke_token(const char *token) {
+    tokens_refresh();
+    bool known = false;
+    for (int i = 0; i < g_token_count; i++) {
+        if (http_secure_streq(token, g_tokens[i]))
+            known = true;
+    }
+    if (!known)
+        return false;
+
+    // Rewrite the file without the revoked token's line (preserving other
+    // lines, including their comments).
+    FILE *in = fopen(OAUTH_TOKENS_PATH, "rb");
+    if (!in)
+        return false;
+    char tmp_path[280];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", OAUTH_TOKENS_PATH);
+    FILE *out = fopen(tmp_path, "wb");
+    if (!out) {
+        fclose(in);
+        return false;
+    }
+    char line[256];
+    while (fgets(line, sizeof(line), in)) {
+        char *tok = line;
+        while (*tok == ' ' || *tok == '\t') tok++;
+        size_t len = strcspn(tok, " \t\r\n#");
+        if (len == strlen(token) && memcmp(tok, token, len) == 0)
+            continue; // drop this line
+        fputs(line, out);
+    }
+    fclose(in);
+    fclose(out);
+    remove(OAUTH_TOKENS_PATH);
+    if (rename(tmp_path, OAUTH_TOKENS_PATH) != 0)
+        return false;
+
+    tokens_load();
+    return true;
+}
+
+bool oauth_mint_token(char *out, size_t outsz, const char *note) {
+    if (outsz < TOKEN_HEX_LEN + 1)
+        return false;
+    uint8_t rnd[32];
+    fill_random(rnd, sizeof(rnd));
+    to_hex(rnd, sizeof(rnd), out);
+    return tokens_append(out, note);
 }
 
 // --- pending authorization codes ---------------------------------------------
@@ -553,11 +603,8 @@ void oauth_handle_token(HttpRequest *req) {
     }
 
     // Mint and persist the token.
-    uint8_t rnd[32];
     char token[TOKEN_HEX_LEN + 1];
-    fill_random(rnd, sizeof(rnd));
-    to_hex(rnd, sizeof(rnd), token);
-    if (!tokens_append(token)) {
+    if (!oauth_mint_token(token, sizeof(token), "via oauth login")) {
         send_oauth_error(req->fd, 500, "server_error", "failed to persist token");
         return;
     }

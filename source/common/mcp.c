@@ -5,6 +5,7 @@
 #include "files.h"
 #include "input.h"
 #include "json.h"
+#include "oauth.h"
 #include "power.h"
 #include "jstream.h"
 #include "routes.h"
@@ -541,6 +542,48 @@ static void tool_delete_file(HttpRequest *req, const char *id, const JsonDoc *do
     send_tool_ok(req->fd, id, "deleted");
 }
 
+// Mints a bearer token over the already-authenticated MCP channel so agents
+// can use the raw HTTP API (e.g. curl for large file uploads) without being
+// given credentials out of band.
+static void tool_create_token(HttpRequest *req, const char *id) {
+    char token[65];
+    if (!oauth_mint_token(token, sizeof(token), "via create_token tool")) {
+        send_tool_error(req->fd, id, "failed to persist token");
+        return;
+    }
+    char host[160];
+    snprintf(host, sizeof(host), "%s", req->host[0] ? req->host : "<switch-ip>:<port>");
+    char text[640];
+    snprintf(text, sizeof(text),
+             "token: %s\n\n"
+             "Use it as a Bearer credential with the raw HTTP API, e.g. to "
+             "upload a file:\n"
+             "  curl -H 'Authorization: Bearer %s' -T myapp.nro "
+             "'http://%s/files?path=/switch/myapp.nro'\n\n"
+             "The token does not expire; revoke it by deleting its line from "
+             "config/sys-autopilot/tokens.txt on the SD card.",
+             token, token, host);
+    send_tool_ok(req->fd, id, text);
+}
+
+static void tool_revoke_token(HttpRequest *req, const char *id,
+                              const JsonDoc *doc, int args) {
+    char token[160];
+    int tok = json_obj_get(doc, args, "token");
+    if (tok < 0 || !json_get_string(doc, tok, token, sizeof(token))) {
+        send_tool_error(req->fd, id, "missing 'token'");
+        return;
+    }
+    if (!oauth_revoke_token(token)) {
+        send_tool_error(req->fd, id,
+                        "unknown token (note: the static config.ini token "
+                        "cannot be revoked this way)");
+        return;
+    }
+    LOGF("mcp: revoked a token\n");
+    send_tool_ok(req->fd, id, "token revoked");
+}
+
 static void tool_power(HttpRequest *req, const char *id, PowerAction action,
                        const char *ok_msg) {
     if (!power_actions_available()) {
@@ -598,6 +641,8 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "read_file") == 0)        tool_read_file(req, id, doc, args);
     else if (strcmp(name, "upload_file") == 0)      tool_upload_file(req, id, doc, args, content_streamed);
     else if (strcmp(name, "delete_file") == 0)      tool_delete_file(req, id, doc, args);
+    else if (strcmp(name, "create_token") == 0)     tool_create_token(req, id);
+    else if (strcmp(name, "revoke_token") == 0)     tool_revoke_token(req, id, doc, args);
     else if (strcmp(name, "sleep") == 0)
         tool_power(req, id, PowerAction_Sleep,
                    "entering sleep mode; the server will be unreachable until "
