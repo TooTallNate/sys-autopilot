@@ -1,5 +1,16 @@
 # sys-autopilot
 
+## 1.3.0
+
+### Minor Changes
+
+- [#8](https://github.com/TooTallNate/sys-autopilot/pull/8) [`4a246b9`](https://github.com/TooTallNate/sys-autopilot/commit/4a246b9cb581cc64744d2a19e6f0d7ea2dda076d) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add file hashing for upload verification. A new `hash_file` MCP tool computes a
+  file's SHA-256 (hardware-accelerated and streamed in 32 KB chunks, so memory use
+  is constant for any file size) and returns just the 64-char hex digest. Passing
+  an `expected` digest also reports a `matched` boolean, so an agent can confirm an
+  upload landed intact in a single round-trip. The same digest is available over
+  the raw HTTP API via `GET /files/hash?path=...`.
+
 ## 1.2.0
 
 ### Minor Changes
