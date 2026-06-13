@@ -542,6 +542,41 @@ static void tool_delete_file(HttpRequest *req, const char *id, const JsonDoc *do
     send_tool_ok(req->fd, id, "deleted");
 }
 
+// Computes a file's SHA-256, streamed so memory use stays constant regardless
+// of file size. With an optional "expected" hash, also reports whether they
+// match, so the agent can verify an upload in a single round-trip.
+static void tool_hash_file(HttpRequest *req, const char *id, const JsonDoc *doc, int args) {
+    char fspath[768];
+    if (!get_path_arg(req, id, doc, args, fspath, sizeof(fspath)))
+        return;
+
+    char hexbuf[65];
+    long long size = 0;
+    const char *err = NULL;
+    if (!files_hash_sha256(fspath, hexbuf, &size, &err)) {
+        send_tool_error(req->fd, id, err);
+        return;
+    }
+
+    // Optional case-insensitive comparison against an expected digest.
+    char expected[80];
+    int etok = args >= 0 ? json_obj_get(doc, args, "expected") : -1;
+    bool have_expected = etok >= 0 && json_get_string(doc, etok, expected, sizeof(expected));
+
+    char msg[256];
+    if (have_expected) {
+        bool matched = strcasecmp(expected, hexbuf) == 0;
+        snprintf(msg, sizeof(msg),
+                 "{\"algorithm\":\"sha256\",\"hash\":\"%s\",\"size\":%lld,\"matched\":%s}",
+                 hexbuf, size, matched ? "true" : "false");
+    } else {
+        snprintf(msg, sizeof(msg),
+                 "{\"algorithm\":\"sha256\",\"hash\":\"%s\",\"size\":%lld}",
+                 hexbuf, size);
+    }
+    send_tool_ok(req->fd, id, msg);
+}
+
 // Mints a bearer token over the already-authenticated MCP channel so agents
 // can use the raw HTTP API (e.g. curl for large file uploads) without being
 // given credentials out of band.
@@ -641,6 +676,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "read_file") == 0)        tool_read_file(req, id, doc, args);
     else if (strcmp(name, "upload_file") == 0)      tool_upload_file(req, id, doc, args, content_streamed);
     else if (strcmp(name, "delete_file") == 0)      tool_delete_file(req, id, doc, args);
+    else if (strcmp(name, "hash_file") == 0)        tool_hash_file(req, id, doc, args);
     else if (strcmp(name, "create_token") == 0)     tool_create_token(req, id);
     else if (strcmp(name, "revoke_token") == 0)     tool_revoke_token(req, id, doc, args);
     else if (strcmp(name, "sleep") == 0)

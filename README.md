@@ -136,6 +136,7 @@ Details:
 | `read_file` | Read text files (32 KB pages, negative `offset` = tail) — ideal for logs |
 | `upload_file` | Write a file (base64 `content`, **streamed to SD — no size cap**) |
 | `delete_file` | Delete a file / empty directory |
+| `hash_file` | SHA-256 a file (streamed, any size); optional `expected` returns `matched` — verify an upload in one call |
 
 Button names: `A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT LSTICK RSTICK
 HOME CAPTURE` (aliases: `START`, `SELECT`, `DUP/DDOWN/DLEFT/DRIGHT`).
@@ -194,6 +195,7 @@ All paths are rooted at the SD card (`sdmc:`); `..` traversal is rejected.
 ```
 GET    /files?path=/switch/myapp/log.txt          download / read a file
 GET    /files?path=/switch/myapp/log.txt&offset=-4096   tail: last 4 KB
+GET    /files/hash?path=/switch/myapp.nro          SHA-256 digest (JSON)
 GET    /files?path=/switch/                       directory listing (JSON)
 PUT    /files?path=/switch/myapp.nro              upload (raw request body)
 DELETE /files?path=/switch/myapp.nro              delete file / empty dir
@@ -202,6 +204,8 @@ DELETE /files?path=/switch/myapp.nro              delete file / empty dir
 ```sh
 # Deploy a build
 curl -T myapp.nro "http://<ip>:4150/files?path=/switch/myapp.nro"
+# Verify it landed intact (compare against `shasum -a 256 myapp.nro`)
+curl "http://<ip>:4150/files/hash?path=/switch/myapp.nro"
 # Tail a log
 curl "http://<ip>:4150/files?path=/switch/myapp/debug.log&offset=-2048"
 ```

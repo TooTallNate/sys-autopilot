@@ -11,6 +11,7 @@
 void files_handle_get(HttpRequest *req);    // file download or directory listing
 void files_handle_put(HttpRequest *req);    // upload (streamed write)
 void files_handle_delete(HttpRequest *req); // remove file or empty directory
+void files_handle_hash(HttpRequest *req);   // SHA-256 of a file (JSON)
 
 // --- Shared helpers (also used by the MCP tools) -----------------------------
 
@@ -28,3 +29,10 @@ char *files_build_listing(const char *fspath, const char *userpath,
 
 // Deletes a file or empty directory. Returns true on success, *err on failure.
 bool files_delete_path(const char *fspath, const char **err);
+
+// Computes the SHA-256 of a regular file, streamed in fixed-size chunks (so
+// memory use is constant regardless of file size). On success writes a 64-char
+// lowercase hex string (NUL-terminated) into out_hex and the byte count into
+// *out_size, and returns true. On failure returns false with *err set.
+bool files_hash_sha256(const char *fspath, char out_hex[65], long long *out_size,
+                       const char **err);

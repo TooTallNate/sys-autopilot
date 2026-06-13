@@ -1,6 +1,7 @@
 #include "files.h"
 #include "json.h"
 #include "log.h"
+#include "sha256.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -193,6 +194,55 @@ bool files_delete_path(const char *fspath, const char **err) {
     return true;
 }
 
+bool files_hash_sha256(const char *fspath, char out_hex[65], long long *out_size,
+                       const char **err) {
+    struct stat st;
+    if (stat(fspath, &st) != 0) {
+        *err = "no such file or directory";
+        return false;
+    }
+    if (S_ISDIR(st.st_mode)) {
+        *err = "is a directory";
+        return false;
+    }
+
+    FILE *f = fopen(fspath, "rb");
+    if (!f) {
+        *err = "open failed";
+        return false;
+    }
+
+    Sha256Stream sha;
+    sha256_stream_init(&sha);
+
+    long long total = 0;
+    size_t n;
+    while ((n = fread(g_io_buf, 1, IO_BUF_SIZE, f)) > 0) {
+        sha256_stream_update(&sha, g_io_buf, n);
+        total += (long long)n;
+    }
+    bool read_err = ferror(f) != 0;
+    fclose(f);
+    if (read_err) {
+        *err = "read failed";
+        return false;
+    }
+
+    uint8_t digest[32];
+    sha256_stream_final(&sha, digest);
+
+    static const char hex[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) {
+        out_hex[i * 2]     = hex[digest[i] >> 4];
+        out_hex[i * 2 + 1] = hex[digest[i] & 0xF];
+    }
+    out_hex[64] = '\0';
+
+    if (out_size)
+        *out_size = total;
+    return true;
+}
+
 static void send_file(HttpRequest *req, const char *fspath, const struct stat *st) {
     long long offset = 0;
     long long length = -1;
@@ -275,6 +325,26 @@ void files_handle_get(HttpRequest *req) {
     } else {
         send_file(req, fspath, &st);
     }
+}
+
+void files_handle_hash(HttpRequest *req) {
+    char fspath[768];
+    if (!resolve_query_path(req, fspath, sizeof(fspath)))
+        return;
+
+    char hexbuf[65];
+    long long size = 0;
+    const char *err = NULL;
+    if (!files_hash_sha256(fspath, hexbuf, &size, &err)) {
+        int code = (err && strstr(err, "no such")) ? 404
+                 : (err && strstr(err, "directory")) ? 400
+                 : 500;
+        http_send_error(req->fd, code, err);
+        return;
+    }
+    http_send_json(req->fd, 200,
+                   "{\"path\":\"%s\",\"algorithm\":\"sha256\",\"hash\":\"%s\",\"size\":%lld}",
+                   fspath + strlen(FILES_ROOT), hexbuf, size);
 }
 
 void files_handle_put(HttpRequest *req) {

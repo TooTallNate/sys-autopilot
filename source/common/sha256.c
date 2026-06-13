@@ -1,8 +1,27 @@
 #include "sha256.h"
 
+#include <string.h>
+
 #ifdef __SWITCH__
 
 #include <switch.h>
+
+// On the Switch, back the streaming context with libnx's hardware-accelerated
+// Sha256Context.
+_Static_assert(sizeof(Sha256Context) <= sizeof(((Sha256Stream *)0)->opaque),
+               "Sha256Stream storage too small for libnx Sha256Context");
+
+void sha256_stream_init(Sha256Stream *st) {
+    sha256ContextCreate((Sha256Context *)st->opaque);
+}
+
+void sha256_stream_update(Sha256Stream *st, const void *data, size_t len) {
+    sha256ContextUpdate((Sha256Context *)st->opaque, data, len);
+}
+
+void sha256_stream_final(Sha256Stream *st, uint8_t out[32]) {
+    sha256ContextGetHash((Sha256Context *)st->opaque, out);
+}
 
 void sha256_hash(uint8_t out[32], const void *data, size_t len) {
     sha256CalculateHash(out, data, len);
@@ -10,14 +29,15 @@ void sha256_hash(uint8_t out[32], const void *data, size_t len) {
 
 #else // host (tests): portable implementation
 
-#include <string.h>
-
 typedef struct {
     uint32_t state[8];
     uint64_t bitlen;
     uint8_t data[64];
     size_t datalen;
 } Sha256Ctx;
+
+_Static_assert(sizeof(Sha256Ctx) <= sizeof(((Sha256Stream *)0)->opaque),
+               "Sha256Stream storage too small for portable Sha256Ctx");
 
 static const uint32_t K[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
@@ -64,41 +84,64 @@ static void transform(Sha256Ctx *ctx, const uint8_t *data) {
     ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
 }
 
-void sha256_hash(uint8_t out[32], const void *data, size_t len) {
-    Sha256Ctx ctx = {
-        .state = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 },
-    };
+static void ctx_init(Sha256Ctx *ctx) {
+    static const uint32_t iv[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
+    memcpy(ctx->state, iv, sizeof(iv));
+    ctx->bitlen = 0;
+    ctx->datalen = 0;
+}
 
-    const uint8_t *p = data;
+static void ctx_update(Sha256Ctx *ctx, const uint8_t *p, size_t len) {
     for (size_t i = 0; i < len; i++) {
-        ctx.data[ctx.datalen++] = p[i];
-        if (ctx.datalen == 64) {
-            transform(&ctx, ctx.data);
-            ctx.bitlen += 512;
-            ctx.datalen = 0;
+        ctx->data[ctx->datalen++] = p[i];
+        if (ctx->datalen == 64) {
+            transform(ctx, ctx->data);
+            ctx->bitlen += 512;
+            ctx->datalen = 0;
         }
     }
+}
 
-    ctx.bitlen += ctx.datalen * 8;
-    size_t i = ctx.datalen;
-    ctx.data[i++] = 0x80;
+static void ctx_final(Sha256Ctx *ctx, uint8_t out[32]) {
+    ctx->bitlen += ctx->datalen * 8;
+    size_t i = ctx->datalen;
+    ctx->data[i++] = 0x80;
     if (i > 56) {
-        while (i < 64) ctx.data[i++] = 0;
-        transform(&ctx, ctx.data);
+        while (i < 64) ctx->data[i++] = 0;
+        transform(ctx, ctx->data);
         i = 0;
     }
-    while (i < 56) ctx.data[i++] = 0;
+    while (i < 56) ctx->data[i++] = 0;
     for (int j = 7; j >= 0; j--)
-        ctx.data[i++] = (uint8_t)(ctx.bitlen >> (j * 8));
-    transform(&ctx, ctx.data);
+        ctx->data[i++] = (uint8_t)(ctx->bitlen >> (j * 8));
+    transform(ctx, ctx->data);
 
     for (int j = 0; j < 8; j++) {
-        out[j * 4]     = (uint8_t)(ctx.state[j] >> 24);
-        out[j * 4 + 1] = (uint8_t)(ctx.state[j] >> 16);
-        out[j * 4 + 2] = (uint8_t)(ctx.state[j] >> 8);
-        out[j * 4 + 3] = (uint8_t)(ctx.state[j]);
+        out[j * 4]     = (uint8_t)(ctx->state[j] >> 24);
+        out[j * 4 + 1] = (uint8_t)(ctx->state[j] >> 16);
+        out[j * 4 + 2] = (uint8_t)(ctx->state[j] >> 8);
+        out[j * 4 + 3] = (uint8_t)(ctx->state[j]);
     }
+}
+
+void sha256_stream_init(Sha256Stream *st) {
+    ctx_init((Sha256Ctx *)st->opaque);
+}
+
+void sha256_stream_update(Sha256Stream *st, const void *data, size_t len) {
+    ctx_update((Sha256Ctx *)st->opaque, data, len);
+}
+
+void sha256_stream_final(Sha256Stream *st, uint8_t out[32]) {
+    ctx_final((Sha256Ctx *)st->opaque, out);
+}
+
+void sha256_hash(uint8_t out[32], const void *data, size_t len) {
+    Sha256Ctx ctx;
+    ctx_init(&ctx);
+    ctx_update(&ctx, data, len);
+    ctx_final(&ctx, out);
 }
 
 #endif // __SWITCH__
