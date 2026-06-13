@@ -94,6 +94,7 @@ static void test_tools_list(void) {
     const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\"}");
     assert(strstr(r, "\"tap_buttons\""));
     assert(strstr(r, "\"upload_file\""));
+    assert(strstr(r, "\"hash_file\""));
     assert(strstr(r, "\"screenshot\""));
     assert(strstr(r, "\"inputSchema\""));
     printf("tools/list ok\n");
@@ -208,6 +209,65 @@ static void test_upload_and_files(void) {
     printf("upload/files ok\n");
 }
 
+static void test_hash_file(void) {
+    system("rm -rf " FAKE_SD " && mkdir -p " FAKE_SD);
+
+    // Write a known file directly (avoids depending on upload ordering here).
+    const char *payload = "Hello, upload!\nLine two.";
+    const char *expect_hex =
+        "0266a67eaf1212ea81e14133d35c8df97d980c17c48ce4ada3c569308e2e2e4e";
+    FILE *f = fopen(FAKE_SD "/h.txt", "wb");
+    assert(f);
+    fwrite(payload, 1, strlen(payload), f);
+    fclose(f);
+
+    // No 'expected': returns the digest + size, no 'matched' field.
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"hash_file\",\"arguments\":{\"path\":\"/h.txt\"}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "\\\"algorithm\\\":\\\"sha256\\\""));
+    assert(strstr(r, expect_hex));
+    assert(strstr(r, "\\\"size\\\":24"));
+    assert(!strstr(r, "matched"));
+
+    // Correct 'expected' -> matched:true.
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"hash_file\",\"arguments\":"
+             "{\"path\":\"/h.txt\",\"expected\":\"%s\"}}}", expect_hex);
+    r = do_rpc(body);
+    assert(strstr(r, "\\\"matched\\\":true"));
+
+    // Uppercase 'expected' still matches (case-insensitive).
+    snprintf(body, sizeof(body),
+             "{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"tools/call\","
+             "\"params\":{\"name\":\"hash_file\",\"arguments\":"
+             "{\"path\":\"/h.txt\",\"expected\":\"0266A67EAF1212EA81E14133D35C8DF9"
+             "7D980C17C48CE4ADA3C569308E2E2E4E\"}}}");
+    r = do_rpc(body);
+    assert(strstr(r, "\\\"matched\\\":true"));
+
+    // Wrong 'expected' -> matched:false (still not an error).
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":43,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"hash_file\",\"arguments\":"
+               "{\"path\":\"/h.txt\",\"expected\":\"deadbeef\"}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "\\\"matched\\\":false"));
+
+    // Missing file -> tool error.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":44,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"hash_file\",\"arguments\":{\"path\":\"/nope.txt\"}}}");
+    assert(strstr(r, "\"isError\":true"));
+
+    // Path traversal rejected.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":45,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"hash_file\",\"arguments\":{\"path\":\"/../etc/passwd\"}}}");
+    assert(strstr(r, "\"isError\":true"));
+
+    printf("hash_file ok\n");
+}
+
 static void test_input_with_screenshot(void) {
     // Input + screenshot in a single round trip: [text, image] content.
     const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\","
@@ -313,6 +373,7 @@ int main(void) {
     test_tap_sequence();
     test_screenshot();
     test_upload_and_files();
+    test_hash_file();
     test_input_with_screenshot();
     test_create_token();
     test_power_tools();

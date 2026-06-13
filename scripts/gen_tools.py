@@ -131,6 +131,22 @@ tools = [
                         "required": ["path"]},
     },
     {
+        "name": "hash_file",
+        "description": ("Compute the SHA-256 of a file on the SD card. The file is hashed in "
+                        "a streaming fashion (constant memory, any size), and only the 64-char "
+                        "hex digest is returned - not the file contents. Use this to verify an "
+                        "upload landed intact: pass the SHA-256 you expected as 'expected' and "
+                        "the result reports matched:true/false. Returns JSON: "
+                        "{algorithm, hash, size[, matched]}."),
+        "inputSchema": {"type": "object", "properties": {
+            "path": path_prop,
+            "expected": {"type": "string",
+                         "description": ("Optional expected SHA-256 hex digest. When provided, the "
+                                         "result includes a 'matched' boolean (case-insensitive "
+                                         "comparison).")},
+        }, "required": ["path"]},
+    },
+    {
         "name": "create_token",
         "description": ("Create a new bearer token for the raw HTTP API (returned as text). "
                         "Useful when a tool call is impractical, e.g. uploading large files "

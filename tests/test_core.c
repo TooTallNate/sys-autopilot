@@ -8,6 +8,7 @@
 #include "buttons.h"
 #include "json.h"
 #include "jstream.h"
+#include "sha256.h"
 
 // --- base64 -------------------------------------------------------------------
 
@@ -220,11 +221,73 @@ static void test_buttons(void) {
     printf("buttons ok\n");
 }
 
+// --- sha256 ------------------------------------------------------------------
+
+static void to_hex(const uint8_t *in, size_t n, char *out) {
+    static const char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < n; i++) {
+        out[i * 2]     = hex[in[i] >> 4];
+        out[i * 2 + 1] = hex[in[i] & 0xF];
+    }
+    out[n * 2] = '\0';
+}
+
+static void test_sha256(void) {
+    uint8_t digest[32];
+    char hex[65];
+
+    // Known-answer vectors.
+    sha256_hash(digest, "", 0);
+    to_hex(digest, 32, hex);
+    assert(strcmp(hex, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") == 0);
+
+    sha256_hash(digest, "abc", 3);
+    to_hex(digest, 32, hex);
+    assert(strcmp(hex, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") == 0);
+
+    // Streaming API must agree with the one-shot version, including across
+    // 64-byte block boundaries. 1000 'a's -> known digest.
+    char buf[1000];
+    memset(buf, 'a', sizeof(buf));
+
+    sha256_hash(digest, buf, sizeof(buf));
+    to_hex(digest, 32, hex);
+    char oneshot[65];
+    strcpy(oneshot, hex);
+
+    // Feed in awkward chunk sizes to exercise buffering.
+    Sha256Stream st;
+    sha256_stream_init(&st);
+    size_t off = 0;
+    size_t chunks[] = { 1, 63, 64, 65, 200, 7 };
+    for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]) && off < sizeof(buf); i++) {
+        size_t n = chunks[i];
+        if (off + n > sizeof(buf))
+            n = sizeof(buf) - off;
+        sha256_stream_update(&st, buf + off, n);
+        off += n;
+    }
+    if (off < sizeof(buf))
+        sha256_stream_update(&st, buf + off, sizeof(buf) - off);
+    sha256_stream_final(&st, digest);
+    to_hex(digest, 32, hex);
+    assert(strcmp(hex, oneshot) == 0);
+
+    // Empty streaming hash matches the empty one-shot vector.
+    sha256_stream_init(&st);
+    sha256_stream_final(&st, digest);
+    to_hex(digest, 32, hex);
+    assert(strcmp(hex, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") == 0);
+
+    printf("sha256 ok\n");
+}
+
 int main(void) {
     test_base64();
     test_json();
     test_jstream();
     test_buttons();
+    test_sha256();
     printf("all core tests passed\n");
     return 0;
 }

@@ -18,7 +18,7 @@ cc $CFLAGS -o "$OUT/test_http" test_http.c "$SRC/http.c" "$SRC/base64.c"
 
 echo "== test_core =="
 cc $CFLAGS -o "$OUT/test_core" test_core.c \
-    "$SRC/base64.c" "$SRC/buttons.c" "$SRC/json.c" "$SRC/jstream.c"
+    "$SRC/base64.c" "$SRC/buttons.c" "$SRC/json.c" "$SRC/jstream.c" "$SRC/sha256.c"
 "$OUT/test_core"
 
 echo "== test_oauth =="

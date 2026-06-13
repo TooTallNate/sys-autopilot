@@ -205,6 +205,7 @@ static const Route kRoutes[] = {
     { "POST",   "/controller/attach", handle_controller_attach },
     { "POST",   "/controller/detach", handle_controller_detach },
     { "GET",    "/files",             files_handle_get },
+    { "GET",    "/files/hash",        files_handle_hash },
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
     { "POST",   "/mcp",               mcp_handle_post },
