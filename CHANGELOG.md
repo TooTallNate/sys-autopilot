@@ -1,5 +1,27 @@
 # sys-autopilot
 
+## 1.4.0
+
+### Minor Changes
+
+- [#11](https://github.com/TooTallNate/sys-autopilot/pull/11) [`9392d7e`](https://github.com/TooTallNate/sys-autopilot/commit/9392d7e8e8b66da6955ce2c00a234fc35ec69fbb) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add optional file logging for the sysmodule. Since a sysmodule has no console
+  output, diagnostics can now be captured by setting `log = true` in
+  `config.ini`; output is appended to `sdmc:/config/sys-autopilot/log.txt`.
+  Logging is off by default and gated at runtime, so it has no cost when unused.
+
+- [#10](https://github.com/TooTallNate/sys-autopilot/pull/10) [`4851df6`](https://github.com/TooTallNate/sys-autopilot/commit/4851df624f862991392fd5f3fb8473da323b8bd9) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add mDNS / DNS-SD network discovery. The console now advertises itself on the
+  local network as `<hostname>.local` and publishes the `_sys-autopilot._tcp`
+  service with a TXT record describing the version/path/auth/model/firmware/
+  Atmosphère version, so MCP clients and `curl` can target a stable name instead
+  of a hard-coded IP.
+
+  - New `hostname` key in `config.ini`. When blank it auto-generates
+    `switch-<last 4 of serial>`, which is unique per console so two devices on
+    the same network don't collide.
+  - The LAN address is obtained from `nifm` (a sysmodule's `gethostid()` only
+    ever returns loopback), with the server retrying until the interface is up.
+  - New `scripts/discover.sh` helper browses for consoles on the LAN.
+
 ## 1.3.0
 
 ### Minor Changes
