@@ -5,7 +5,9 @@
 #include <switch.h>
 
 #include "common/config.h"
+#include "common/device_info.h"
 #include "common/input.h"
+#include "common/netif.h"
 #include "common/oauth.h"
 #include "common/power.h"
 #include "common/server.h"
@@ -46,6 +48,10 @@ int main(int argc, char* argv[])
     Config cfg;
     config_load(&cfg);
 
+    // Device facts + network interface for mDNS (best-effort under HBL).
+    device_info_init();
+    netif_init();
+
     oauth_init(&cfg);
 
     // Best-effort: applets are suspended during sleep anyway, but register
@@ -57,8 +63,11 @@ int main(int argc, char* argv[])
         printf("spsm unavailable (power tools disabled)\n");
 
     struct in_addr addr = { .s_addr = gethostid() };
+    char hostname[64];
+    config_hostname(&cfg, device_info_get()->serial, hostname, sizeof(hostname));
     printf("sys-autopilot (dev app)\n");
     printf("Listening on http://%s:%d\n", inet_ntoa(addr), cfg.port);
+    printf("Discoverable at http://%s.local:%d\n", hostname, cfg.port);
     printf("Press + to exit.\n\n");
     consoleUpdate(NULL);
 

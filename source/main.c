@@ -3,7 +3,10 @@
 #include <switch.h>
 
 #include "common/config.h"
+#include "common/device_info.h"
 #include "common/input.h"
+#include "common/log.h"
+#include "common/netif.h"
 #include "common/oauth.h"
 #include "common/power.h"
 #include "common/server.h"
@@ -45,7 +48,10 @@ static const SocketInitConfig kSocketConfig = {
     .udp_tx_buf_size     = 0x2400,
     .udp_rx_buf_size     = 0xA500,
     .sb_efficiency       = 2,
-    .num_bsd_sessions    = 2,
+    // Sessions in concurrent use: the TCP listener, one accepted client, and
+    // the persistent mDNS/DNS-SD UDP socket. 3 is the minimum; use 4 for a
+    // little headroom.
+    .num_bsd_sessions    = 4,
     .bsd_service_type    = BsdServiceType_User,
 };
 
@@ -101,11 +107,24 @@ void __appInit(void)
     // the endpoints report unavailability.
     power_spsm_init();
 
+    // Gather device facts (model/firmware/Atmosphère) for the mDNS TXT record
+    // now, while the sm session is still open: the underlying set:sys/spl
+    // smGetService calls would fail after smExit(). Best-effort; failures just
+    // leave the corresponding TXT fields empty.
+    device_info_init();
+
+    // Network Interface Manager: nifm gives us the real LAN IP for mDNS
+    // (gethostid() only ever returns loopback in a sysmodule). Must be opened
+    // while sm is up; the session is held for the process lifetime.
+    if (!netif_init())
+        LOGF("netif: nifm init failed; mDNS A records unavailable\n");
+
     smExit();
 }
 
 void __appExit(void)
 {
+    netif_exit();
     power_spsm_exit();
     power_exit();
     timeExit();

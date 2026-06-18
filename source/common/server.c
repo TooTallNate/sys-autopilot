@@ -1,6 +1,7 @@
 #include "server.h"
 #include "http.h"
 #include "input.h"
+#include "mdns.h"
 #include "oauth.h"
 #include "power.h"
 #include "routes.h"
@@ -107,7 +108,16 @@ static bool retry_wait(ServerIdleCb idle) {
 
 void server_run(const Config *cfg, ServerIdleCb idle) {
     int listen_fd = -1;
+    int mdns_fd = -1;
     bool suspended = false;
+
+    // Build the mDNS / DNS-SD advertising parameters once. If the local IP
+    // isn't available yet (interface down), discovery is retried lazily each
+    // time the listener is (re)opened below.
+    static MdnsConfig mdns_cfg; // off the stack; lives for the loop
+    bool mdns_ready = mdns_config_init(&mdns_cfg, cfg);
+    if (!mdns_ready)
+        LOGF("server: mDNS: local IP not yet known; will retry\n");
 
     // Let the http I/O layer drive the idle callback during transfers too.
     http_set_idle_callback(idle);
@@ -124,6 +134,10 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             if (listen_fd >= 0) {
                 close(listen_fd);
                 listen_fd = -1;
+            }
+            if (mdns_fd >= 0) {
+                mdns_close(mdns_fd);
+                mdns_fd = -1;
             }
             // Release the HDLS work buffer: holding hid transfer memory
             // across the transition crashes the sleep sequence.
@@ -154,22 +168,59 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             LOGF("server: listening on port %d\n", cfg->port);
         }
 
-        struct pollfd pfd = { .fd = listen_fd, .events = POLLIN };
-        int pr = poll(&pfd, 1, 100);
+        // (Re)establish mDNS advertising. The listener binds to INADDR_ANY and
+        // succeeds even before DHCP finishes, so we can't gate this on the
+        // listener: instead keep retrying here until the local IP is known and
+        // the socket is open. Cheap no-op once mdns_fd is up.
+        if (mdns_fd < 0) {
+            if (!mdns_ready)
+                mdns_ready = mdns_config_init(&mdns_cfg, cfg);
+            if (mdns_ready) {
+                mdns_fd = mdns_open(&mdns_cfg);
+                if (mdns_fd >= 0) {
+                    LOGF("server: mDNS up as %s\n", mdns_cfg.host);
+                    mdns_announce(mdns_fd, &mdns_cfg);
+                }
+            }
+        }
+
+        struct pollfd pfds[2];
+        pfds[0].fd = listen_fd;
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        nfds_t nfds = 1;
+        if (mdns_fd >= 0) {
+            pfds[1].fd = mdns_fd;
+            pfds[1].events = POLLIN;
+            pfds[1].revents = 0;
+            nfds = 2;
+        }
+        int pr = poll(pfds, nfds, 100);
 
         if (idle && !idle())
             break;
 
         if (pr < 0) {
-            // bsd service hiccup; rebuild the listener.
+            // bsd service hiccup; rebuild both sockets.
             LOGF("server: poll failed (errno=%d), rebuilding listener\n", errno);
             close(listen_fd);
             listen_fd = -1;
+            if (mdns_fd >= 0) {
+                mdns_close(mdns_fd);
+                mdns_fd = -1;
+            }
             if (!retry_wait(idle))
                 break;
             continue;
         }
-        if (pr == 0 || !(pfd.revents & POLLIN))
+        if (pr == 0)
+            continue;
+
+        // Service mDNS queries before HTTP accepts.
+        if (mdns_fd >= 0 && (pfds[1].revents & POLLIN))
+            mdns_handle_readable(mdns_fd, &mdns_cfg);
+
+        if (!(pfds[0].revents & POLLIN))
             continue;
 
         int client = accept(listen_fd, NULL, NULL);
@@ -200,4 +251,6 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
     http_set_idle_callback(NULL);
     if (listen_fd >= 0)
         close(listen_fd);
+    if (mdns_fd >= 0)
+        mdns_close(mdns_fd);
 }

@@ -15,6 +15,12 @@ static const char *kDefaultConfig =
     "; TCP port the HTTP server listens on.\n"
     "port = 4150\n"
     "\n"
+    "; Name advertised on the local network via mDNS / DNS-SD (Bonjour).\n"
+    "; The console becomes reachable at '<hostname>.local' and advertises the\n"
+    "; '_sys-autopilot._tcp' service so clients can discover it without an IP.\n"
+    "; Leave blank to auto-generate 'switch-<last 4 of serial>' (unique per console).\n"
+    "hostname =\n"
+    "\n"
     "; Optional authentication. Auth is enforced when EITHER a bearer token\n"
     "; is set, or both username and password are set (HTTP Basic).\n"
     "; Clients may then use 'Authorization: Bearer <token>' or Basic auth.\n"
@@ -87,15 +93,55 @@ void config_load(Config *cfg) {
             snprintf(cfg->password, sizeof(cfg->password), "%s", val);
         } else if (strcasecmp(key, "token") == 0) {
             snprintf(cfg->token, sizeof(cfg->token), "%s", val);
+        } else if (strcasecmp(key, "hostname") == 0) {
+            snprintf(cfg->hostname, sizeof(cfg->hostname), "%s", val);
         }
     }
     fclose(f);
 
-    LOGF("config: port=%d auth=%s\n", cfg->port,
-         config_auth_enabled(cfg) ? "enabled" : "disabled");
+    LOGF("config: port=%d auth=%s hostname=%s\n", cfg->port,
+         config_auth_enabled(cfg) ? "enabled" : "disabled",
+         cfg->hostname[0] != '\0' ? cfg->hostname : "(auto)");
 }
 
 bool config_auth_enabled(const Config *cfg) {
     return cfg->token[0] != '\0' ||
            (cfg->username[0] != '\0' && cfg->password[0] != '\0');
+}
+
+// Keeps only DNS-label-safe chars (alnum and '-'), lowercasing letters.
+static size_t append_sanitized(char *out, size_t cap, size_t len, const char *s) {
+    for (; *s && len + 1 < cap; s++) {
+        char c = *s;
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c + 32);
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')
+            out[len++] = c;
+    }
+    out[len] = '\0';
+    return len;
+}
+
+const char *config_hostname(const Config *cfg, const char *serial,
+                            char *out, size_t cap) {
+    if (cap == 0)
+        return out;
+
+    if (cfg->hostname[0] != '\0') {
+        snprintf(out, cap, "%s", cfg->hostname);
+        return out;
+    }
+
+    // Auto: "switch-<last N serial chars>" (or just "switch" without a serial).
+    size_t len = append_sanitized(out, cap, 0, CONFIG_DEFAULT_PREFIX);
+    size_t slen = serial ? strlen(serial) : 0;
+    if (slen > 0) {
+        const char *suffix = serial;
+        if (slen > CONFIG_SERIAL_SUFFIX_LEN)
+            suffix = serial + (slen - CONFIG_SERIAL_SUFFIX_LEN);
+        if (len + 1 < cap)
+            out[len++] = '-';
+        len = append_sanitized(out, cap, len, suffix);
+    }
+    return out;
 }
