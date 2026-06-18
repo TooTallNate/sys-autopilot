@@ -70,11 +70,19 @@ hostname =
 token =
 username =
 password =
+
+; Write diagnostics to log.txt next to this file (the sysmodule has no
+; console output). Off by default; set to true when troubleshooting.
+log = false
 ```
 
 Changes take effect after a reboot. Note this is plain HTTP — auth protects
 against casual LAN access only. OAuth-issued tokens live in
 `config/sys-autopilot/tokens.txt` next to this file.
+
+> The sysmodule has no console output. To capture diagnostics, set `log = true`
+> in `config.ini` and reboot — it appends to
+> `sdmc:/config/sys-autopilot/log.txt`.
 
 ## Network discovery (mDNS / Bonjour)
 
