@@ -56,6 +56,12 @@ if missing):
 ; TCP port the HTTP server listens on.
 port = 4150
 
+; Name advertised on the local network via mDNS / DNS-SD (Bonjour).
+; The console becomes reachable at '<hostname>.local' and advertises the
+; '_sys-autopilot._tcp' service so clients can discover it without an IP.
+; Leave blank to auto-generate 'switch-<last 4 of serial>' (unique per console).
+hostname =
+
 ; Optional authentication. Auth is enforced when EITHER a bearer token
 ; is set, or both username and password are set (HTTP Basic).
 ; Clients may then use 'Authorization: Bearer <token>' or Basic auth.
@@ -70,6 +76,51 @@ Changes take effect after a reboot. Note this is plain HTTP — auth protects
 against casual LAN access only. OAuth-issued tokens live in
 `config/sys-autopilot/tokens.txt` next to this file.
 
+## Network discovery (mDNS / Bonjour)
+
+So you don't have to chase the console's DHCP-assigned IP, the sysmodule
+advertises itself on the local network via multicast DNS (the same Bonjour /
+zeroconf mechanism used by printers and Chromecasts). Two things are exposed:
+
+- **A hostname** — the console answers to `<hostname>.local`. When `hostname`
+  is blank it defaults to `switch-<last 4 of serial>` (e.g. `switch-5322`),
+  unique per console. Use it anywhere you'd use the IP:
+
+  ```sh
+  curl http://switch-5322.local:4150/status
+  ```
+
+- **A discoverable service** — `_sys-autopilot._tcp`. Clients can find every
+  console on the subnet without knowing any name or IP, then read its details
+  from the advertised TXT record:
+
+  | TXT key | Example | Meaning |
+  |---|---|---|
+  | `version` | `1.3.0` | sys-autopilot version |
+  | `path` | `/mcp` | MCP endpoint path |
+  | `auth` | `oauth` / `token` / `none` | Configured auth scheme |
+  | `model` | `oled` | Console model (`v1`/`v2`/`lite`/`oled`) |
+  | `firmware` | `19.0.1` | Horizon OS version |
+  | `atmosphere` | `1.7.1` | Atmosphère/Exosphère version (when available) |
+
+Browse from any machine on the same network:
+
+```sh
+# Convenience wrapper (auto-detects dns-sd or avahi):
+scripts/discover.sh
+
+# …or use the platform tools directly:
+dns-sd -B _sys-autopilot._tcp           # macOS / Windows (Bonjour)
+avahi-browse -r _sys-autopilot._tcp     # Linux (avahi-utils)
+```
+
+The serial-based default keeps multiple consoles from colliding; set an
+explicit `hostname` in `config.ini` if you'd prefer a friendly name.
+
+> mDNS is **link-local**: it works within a single subnet but does not cross
+> routers/VLANs/VPNs. For cross-subnet access, give the console a DHCP
+> reservation and a name on your router/DNS instead.
+
 ## MCP (Model Context Protocol)
 
 The sysmodule speaks MCP natively at `POST /mcp` (stateless Streamable HTTP
@@ -81,7 +132,7 @@ transport, JSON-RPC 2.0). Point any MCP client directly at the console:
   "mcpServers": {
     "switch": {
       "type": "http",
-      "url": "http://<switch-ip>:4150/mcp",
+      "url": "http://switch-5322.local:4150/mcp",
       "headers": {
         "Authorization": "Bearer <token from config.ini>"
       }
@@ -90,7 +141,9 @@ transport, JSON-RPC 2.0). Point any MCP client directly at the console:
 }
 ```
 
-Omit `headers` when auth is not configured.
+Omit `headers` when auth is not configured. Replace
+`switch-5322.local` with your console's `<hostname>.local` (or its IP
+if mDNS isn't available on your network).
 
 ### OAuth browser login (no manual headers)
 
@@ -103,7 +156,7 @@ you sign in with the config.ini credentials it receives a bearer token
 automatically.
 
 ```sh
-claude mcp add --transport http switch http://<switch-ip>:4150/mcp
+claude mcp add --transport http switch http://switch-5322.local:4150/mcp
 # first use triggers the browser login
 ```
 
@@ -152,6 +205,10 @@ multi-megabyte uploads are context-expensive — deploy `.nro` builds with
 All endpoints return JSON unless noted. POST endpoints take JSON request
 bodies. When auth is configured, send `Authorization: Bearer <token>` (or
 Basic) with every request.
+
+The `<ip>` in the examples below can be replaced with the console's
+mDNS name (e.g. `switch-5322.local`) — see
+[Network discovery](#network-discovery-mdns--bonjour).
 
 ### Screenshots
 
@@ -240,7 +297,9 @@ source/main.c          sysmodule entry (heap, __appInit service setup)
 source/common/         shared server core
   config.c             INI config loader (writes default on first boot)
   http.c               minimal HTTP/1.1 parser + responses + Bearer/Basic auth
-  server.c             non-blocking listen/accept loop
+  server.c             non-blocking listen/accept loop (HTTP + mDNS)
+  mdns.c               mDNS / DNS-SD responder (<hostname>.local + service)
+  device_info.c        device facts for the DNS-SD TXT record (model/fw/ams)
   routes.c             REST endpoint dispatch, /status
   mcp.c                MCP endpoint: JSON-RPC 2.0 dispatch + tools
   mcp_tools.h          generated tools/list payload (scripts/gen_tools.py)
@@ -255,8 +314,9 @@ source/common/         shared server core
 lib/jsmn/              vendored JSON tokenizer (MIT)
 app/                   dev .nro flavor
 tests/                 host-side test suite (./tests/run.sh)
+scripts/discover.sh    find consoles on the LAN via DNS-SD (dns-sd/avahi)
 sys-autopilot.json     NPDM descriptor (title ID 4200000000004150,
-                       services: bsd:u, caps:sc, hid:dbg, set:sys, fsp-srv)
+                       services: bsd:u, caps:sc, hid:dbg, set:sys, fsp-srv, spl:)
 ```
 
 ## Releases & contributing

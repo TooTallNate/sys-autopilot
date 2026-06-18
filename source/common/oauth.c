@@ -1,5 +1,6 @@
 #include "oauth.h"
 #include "base64.h"
+#include "device_info.h"
 #include "json.h"
 #include "log.h"
 #include "sha256.h"
@@ -300,12 +301,23 @@ static AuthCode *code_take(const char *code) {
 
 // --- discovery metadata --------------------------------------------------------
 
-// Resolves the externally-visible base URL from the Host header.
+// Resolves the externally-visible base URL. Prefers the inbound Host header
+// (it reflects exactly how the client reached us — IP or "<name>.local" — so
+// the issuer always matches the client's view). When the Host header is
+// absent, falls back to the configured mDNS hostname so metadata is still
+// usable for clients that discovered us via DNS-SD.
 static bool base_url(const HttpRequest *req, char *out, size_t outsz) {
-    if (req->host[0] == '\0')
-        return false;
-    snprintf(out, outsz, "http://%s", req->host);
-    return true;
+    if (req->host[0] != '\0') {
+        snprintf(out, outsz, "http://%s", req->host);
+        return true;
+    }
+    if (g_cfg) {
+        char name[64];
+        config_hostname(g_cfg, device_info_get()->serial, name, sizeof(name));
+        snprintf(out, outsz, "http://%s.local:%d", name, g_cfg->port);
+        return true;
+    }
+    return false;
 }
 
 void oauth_handle_protected_resource(HttpRequest *req) {
