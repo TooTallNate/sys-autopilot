@@ -35,6 +35,11 @@ ifneq ($(strip $(APP_VERSION)),)
 DEFINES	+=	-DAPP_VERSION=\"$(APP_VERSION)\"
 endif
 
+# The sysmodule has no stdout, so LOGF() is routed to a log file on the SD
+# card. Compiled in unconditionally but gated at runtime by the `log` key in
+# config.ini (see log.{c,h}); disabled by default, so this is free when off.
+DEFINES	+=	-DLOG_TO_FILE
+
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------

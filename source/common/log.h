@@ -1,10 +1,35 @@
 #pragma once
 
-// Lightweight logging. Enabled only in the dev .nro app build (console
-// output); compiled out in the sysmodule build where there is no stdout.
-#ifdef ENABLE_LOG
+#include <stdbool.h>
+
+// Lightweight logging with two sinks:
+//
+//   ENABLE_LOG    -> printf to stdout (dev .nro app: visible on the console).
+//   LOG_TO_FILE   -> append to a log file on the SD card. Always compiled into
+//                    the sysmodule build, but writes only when enabled at
+//                    runtime via log_set_enabled() (driven by the `log` key in
+//                    config.ini), since a sysmodule has no stdout.
+//
+// File logging is best-effort: a failed open/write is silently ignored so it
+// never affects server behavior.
+
+#if defined(ENABLE_LOG)
 #include <stdio.h>
 #define LOGF(...) printf(__VA_ARGS__)
+
+// No-ops in the app build (stdout is always on).
+static inline void log_set_enabled(bool e) { (void)e; }
+
+#elif defined(LOG_TO_FILE)
+#ifndef LOG_FILE_PATH
+#define LOG_FILE_PATH "sdmc:/config/sys-autopilot/log.txt"
+#endif
+// Enable/disable the file sink at runtime. Disabled until called with true.
+void log_set_enabled(bool enabled);
+void log_to_file(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+#define LOGF(...) log_to_file(__VA_ARGS__)
+
 #else
 #define LOGF(...) ((void)0)
+static inline void log_set_enabled(bool e) { (void)e; }
 #endif

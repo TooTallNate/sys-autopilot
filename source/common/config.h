@@ -15,6 +15,9 @@ typedef struct {
     // a default name is derived from the device serial so discovery still
     // works out of the box and two consoles don't collide.
     char hostname[64];
+    // Write diagnostics to sdmc:/config/sys-autopilot/log.txt (sysmodule has
+    // no stdout). Off by default.
+    bool log;
 } Config;
 
 // Prefix for the auto-generated default hostname ("switch-<serial suffix>").

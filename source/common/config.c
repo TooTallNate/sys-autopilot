@@ -28,7 +28,11 @@ static const char *kDefaultConfig =
     "; tokens issued that way are stored in tokens.txt next to this file.\n"
     "token =\n"
     "username =\n"
-    "password =\n";
+    "password =\n"
+    "\n"
+    "; Write diagnostics to log.txt next to this file (the sysmodule has no\n"
+    "; console output). Off by default; set to true when troubleshooting.\n"
+    "log = false\n";
 
 static char *trim(char *s) {
     while (isspace((unsigned char)*s)) s++;
@@ -95,13 +99,23 @@ void config_load(Config *cfg) {
             snprintf(cfg->token, sizeof(cfg->token), "%s", val);
         } else if (strcasecmp(key, "hostname") == 0) {
             snprintf(cfg->hostname, sizeof(cfg->hostname), "%s", val);
+        } else if (strcasecmp(key, "log") == 0) {
+            cfg->log = strcasecmp(val, "true") == 0 ||
+                       strcasecmp(val, "1") == 0 ||
+                       strcasecmp(val, "yes") == 0 ||
+                       strcasecmp(val, "on") == 0;
         }
     }
     fclose(f);
 
-    LOGF("config: port=%d auth=%s hostname=%s\n", cfg->port,
+    // Activate the file log sink now that we know the user's preference, so
+    // subsequent LOGF() calls (here and across the server) are captured.
+    log_set_enabled(cfg->log);
+
+    LOGF("config: port=%d auth=%s hostname=%s log=%s\n", cfg->port,
          config_auth_enabled(cfg) ? "enabled" : "disabled",
-         cfg->hostname[0] != '\0' ? cfg->hostname : "(auto)");
+         cfg->hostname[0] != '\0' ? cfg->hostname : "(auto)",
+         cfg->log ? "on" : "off");
 }
 
 bool config_auth_enabled(const Config *cfg) {
