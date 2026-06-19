@@ -11,6 +11,7 @@
 #include "common/oauth.h"
 #include "common/power.h"
 #include "common/server.h"
+#include "common/settings.h"
 
 static PadState g_pad;
 
@@ -51,6 +52,7 @@ int main(int argc, char* argv[])
     // Device facts + network interface for mDNS (best-effort under HBL).
     device_info_init();
     netif_init();
+    settings_init();
 
     oauth_init(&cfg);
 
@@ -73,6 +75,7 @@ int main(int argc, char* argv[])
 
     server_run(&cfg, app_idle);
 
+    settings_exit();
     input_exit();
     capsscExit();
     hiddbgExit();

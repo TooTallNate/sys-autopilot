@@ -10,6 +10,7 @@
 #include "common/oauth.h"
 #include "common/power.h"
 #include "common/server.h"
+#include "common/settings.h"
 
 // Inner heap: socket transfer memory + stdio buffers + dir listing JSON.
 // The large fixed buffers (JPEG, I/O, HDLS workmem) are static bss.
@@ -119,11 +120,16 @@ void __appInit(void)
     if (!netif_init())
         LOGF("netif: nifm init failed; mDNS A records unavailable\n");
 
+    // System-settings services (lbl/audctl/psm) for the settings tools. Opened
+    // while sm is up; best-effort (a missing service just disables its tool).
+    settings_init();
+
     smExit();
 }
 
 void __appExit(void)
 {
+    settings_exit();
     netif_exit();
     power_spsm_exit();
     power_exit();

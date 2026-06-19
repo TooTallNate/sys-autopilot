@@ -94,7 +94,8 @@ tools = [
     },
     {
         "name": "status",
-        "description": "Get server status: version, console firmware, virtual controller state, uptime.",
+        "description": ("Get server status: version, console firmware, virtual controller state, "
+                        "uptime, and battery percentage / charging state."),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -189,6 +190,64 @@ tools = [
         "description": ("Fully power off the console. WARNING: the server becomes permanently "
                         "unreachable - a human must physically press the power button to turn "
                         "the console back on. Only use when explicitly asked to."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_theme",
+        "description": "Get the system UI theme. Returns \"light\" or \"dark\".",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_theme",
+        "description": "Set the system UI theme (light or dark mode).",
+        "inputSchema": {"type": "object", "properties": {
+            "theme": {"type": "string", "enum": ["light", "dark"]},
+        }, "required": ["theme"]},
+    },
+    {
+        "name": "get_nickname",
+        "description": "Get the console's device nickname (the name shown on the network and in settings).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_nickname",
+        "description": "Set the console's device nickname.",
+        "inputSchema": {"type": "object", "properties": {
+            "nickname": {"type": "string", "description": "New device nickname (max ~127 bytes)."},
+        }, "required": ["nickname"]},
+    },
+    {
+        "name": "get_brightness",
+        "description": "Get the current screen brightness as a value from 0.0 (dimmest) to 1.0 (brightest).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_brightness",
+        "description": ("Set the screen brightness and apply it immediately. Note: if the console "
+                        "has auto-brightness enabled it may adjust again on its own."),
+        "inputSchema": {"type": "object", "properties": {
+            "brightness": {"type": "number", "description": "0.0 (dimmest) to 1.0 (brightest)."},
+        }, "required": ["brightness"]},
+    },
+    {
+        "name": "get_volume",
+        "description": "Get the current master volume as a value from 0.0 (muted) to 1.0 (max).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_volume",
+        "description": "Set the master volume.",
+        "inputSchema": {"type": "object", "properties": {
+            "volume": {"type": "number", "description": "0.0 (muted) to 1.0 (max)."},
+        }, "required": ["volume"]},
+    },
+    {
+        "name": "airplane_mode",
+        "description": ("Enable airplane mode (disable all wireless). WARNING: this disconnects "
+                        "the console from the network, so the server becomes unreachable "
+                        "immediately and CANNOT be re-enabled remotely - a human must turn "
+                        "wireless back on from the console. There is no remote 'disable airplane "
+                        "mode' for that reason. Only use when explicitly asked to."),
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]

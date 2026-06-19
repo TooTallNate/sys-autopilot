@@ -43,7 +43,8 @@ cc $CFLAGS -Ifake \
     -o "$OUT/test_mcp" test_mcp.c stubs.c \
     "$SRC/mcp.c" "$SRC/http.c" "$SRC/base64.c" "$SRC/json.c" "$SRC/jstream.c" \
     "$SRC/buttons.c" "$SRC/apiargs.c" "$SRC/files.c" "$SRC/power.c" \
-    "$SRC/oauth.c" "$SRC/sha256.c" "$SRC/config.c" "$SRC/device_info.c"
+    "$SRC/oauth.c" "$SRC/sha256.c" "$SRC/config.c" "$SRC/device_info.c" \
+    "$SRC/settings.c"
 "$OUT/test_mcp"
 
 echo "ALL HOST TESTS PASSED"

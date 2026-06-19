@@ -7,11 +7,13 @@
 #include "oauth.h"
 #include "power.h"
 #include "screen.h"
+#include "settings.h"
 #include "log.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <switch.h>
 
 // Injected by the Makefile from package.json (the changesets-managed version).
@@ -146,14 +148,141 @@ static void handle_input_stick(HttpRequest *req) {
 
 static void handle_status(HttpRequest *req) {
     u32 ver = hosversionGet();
+    uint32_t pct = 0;
+    bool charging = false;
+    bool have_batt = settings_get_battery(&pct, &charging);
+    if (have_batt) {
+        http_send_json(req->fd, 200,
+                       "{\"version\":\"" APP_VERSION "\","
+                       "\"firmware\":\"%u.%u.%u\","
+                       "\"controllerAttached\":%s,"
+                       "\"uptimeSeconds\":%llu,"
+                       "\"batteryPercent\":%u,"
+                       "\"charging\":%s}",
+                       HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
+                       input_is_attached() ? "true" : "false",
+                       (unsigned long long)routes_uptime_seconds(),
+                       pct, charging ? "true" : "false");
+    } else {
+        http_send_json(req->fd, 200,
+                       "{\"version\":\"" APP_VERSION "\","
+                       "\"firmware\":\"%u.%u.%u\","
+                       "\"controllerAttached\":%s,"
+                       "\"uptimeSeconds\":%llu}",
+                       HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
+                       input_is_attached() ? "true" : "false",
+                       (unsigned long long)routes_uptime_seconds());
+    }
+}
+
+// --- /settings/* --------------------------------------------------------------
+
+static void handle_settings_theme(HttpRequest *req) {
+    if (strcmp(req->method, "GET") == 0) {
+        bool dark = false;
+        if (!settings_get_theme(&dark)) {
+            http_send_error(req->fd, 500, "failed to read theme");
+            return;
+        }
+        http_send_json(req->fd, 200, "{\"theme\":\"%s\"}", dark ? "dark" : "light");
+        return;
+    }
+    // POST {"theme":"light"|"dark"}
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+    char val[16] = {0};
+    int t = json_obj_get(&doc, root, "theme");
+    if (t < 0 || !json_get_string(&doc, t, val, sizeof(val))) {
+        http_send_error(req->fd, 400, "missing 'theme' (\"light\" or \"dark\")");
+        return;
+    }
+    bool dark;
+    if (strcasecmp(val, "dark") == 0)       dark = true;
+    else if (strcasecmp(val, "light") == 0) dark = false;
+    else { http_send_error(req->fd, 400, "'theme' must be \"light\" or \"dark\""); return; }
+
+    if (!settings_set_theme(dark))
+        http_send_error(req->fd, 500, "failed to set theme");
+    else
+        http_send_json(req->fd, 200, "{\"ok\":true,\"theme\":\"%s\"}", dark ? "dark" : "light");
+}
+
+static void handle_settings_nickname(HttpRequest *req) {
+    if (strcmp(req->method, "GET") == 0) {
+        char name[128] = {0};
+        if (!settings_get_nickname(name, sizeof(name))) {
+            http_send_error(req->fd, 500, "failed to read nickname");
+            return;
+        }
+        http_send_json(req->fd, 200, "{\"nickname\":\"%s\"}", name);
+        return;
+    }
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+    char name[128] = {0};
+    int t = json_obj_get(&doc, root, "nickname");
+    if (t < 0 || !json_get_string(&doc, t, name, sizeof(name)) || name[0] == '\0') {
+        http_send_error(req->fd, 400, "missing non-empty 'nickname'");
+        return;
+    }
+    if (!settings_set_nickname(name))
+        http_send_error(req->fd, 500, "failed to set nickname");
+    else
+        http_send_json(req->fd, 200, "{\"ok\":true,\"nickname\":\"%s\"}", name);
+}
+
+// Shared get/set for the two normalized 0..1 float settings.
+static void handle_settings_float(HttpRequest *req, const char *key,
+                                  bool (*get)(float *), bool (*set)(float)) {
+    if (strcmp(req->method, "GET") == 0) {
+        float v = 0.0f;
+        if (!get(&v)) {
+            http_send_error(req->fd, 500, "failed to read setting");
+            return;
+        }
+        http_send_json(req->fd, 200, "{\"%s\":%.3f}", key, v);
+        return;
+    }
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+    int t = json_obj_get(&doc, root, key);
+    double v;
+    if (t < 0 || !json_get_double(&doc, t, &v)) {
+        http_send_error(req->fd, 400, "missing numeric value (0.0 - 1.0)");
+        return;
+    }
+    if (!set((float)v))
+        http_send_error(req->fd, 500, "failed to set setting");
+    else
+        http_send_json(req->fd, 200, "{\"ok\":true,\"%s\":%.3f}", key,
+                       v < 0 ? 0 : (v > 1 ? 1 : v));
+}
+
+static void handle_settings_brightness(HttpRequest *req) {
+    handle_settings_float(req, "brightness",
+                          settings_get_brightness, settings_set_brightness);
+}
+
+static void handle_settings_volume(HttpRequest *req) {
+    handle_settings_float(req, "volume",
+                          settings_get_volume, settings_set_volume);
+}
+
+static void handle_settings_airplane(HttpRequest *req) {
+    // Enable-only: disabling wireless cuts our own connectivity.
+    if (!settings_disable_wireless()) {
+        http_send_error(req->fd, 500, "failed to disable wireless");
+        return;
+    }
     http_send_json(req->fd, 200,
-                   "{\"version\":\"" APP_VERSION "\","
-                   "\"firmware\":\"%u.%u.%u\","
-                   "\"controllerAttached\":%s,"
-                   "\"uptimeSeconds\":%llu}",
-                   HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
-                   input_is_attached() ? "true" : "false",
-                   (unsigned long long)routes_uptime_seconds());
+                   "{\"ok\":true,\"note\":\"wireless disabled; the server is now "
+                   "unreachable until wireless is re-enabled on the console\"}");
 }
 
 // --- /power/* ------------------------------------------------------------------
@@ -212,6 +341,15 @@ static const Route kRoutes[] = {
     { "POST",   "/power/sleep",       handle_power_sleep },
     { "POST",   "/power/restart",     handle_power_restart },
     { "POST",   "/power/off",         handle_power_off },
+    { "GET",    "/settings/theme",        handle_settings_theme },
+    { "POST",   "/settings/theme",        handle_settings_theme },
+    { "GET",    "/settings/nickname",     handle_settings_nickname },
+    { "POST",   "/settings/nickname",     handle_settings_nickname },
+    { "GET",    "/settings/brightness",   handle_settings_brightness },
+    { "POST",   "/settings/brightness",   handle_settings_brightness },
+    { "GET",    "/settings/volume",       handle_settings_volume },
+    { "POST",   "/settings/volume",       handle_settings_volume },
+    { "POST",   "/settings/airplane",     handle_settings_airplane },
     { "POST",   "/oauth/register",    oauth_handle_register },
     { "GET",    "/oauth/authorize",   oauth_handle_authorize_get },
     { "POST",   "/oauth/authorize",   oauth_handle_authorize_post },
