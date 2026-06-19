@@ -495,18 +495,20 @@ void mdns_handle_readable(int fd, const MdnsConfig *cfg) {
              unicast ? "unicast" : "multicast");
 }
 
-void mdns_announce(int fd, const MdnsConfig *cfg) {
+bool mdns_announce(int fd, const MdnsConfig *cfg) {
     static uint8_t outbuf[1500];
     size_t len = mdns_build_announcement(cfg, outbuf, sizeof(outbuf));
     if (len == 0)
-        return;
+        return false;
     struct sockaddr_in grp = mdns_group();
     ssize_t sent = sendto(fd, outbuf, len, 0,
                           (struct sockaddr *)&grp, sizeof(grp));
-    if (sent < 0)
+    if (sent < 0) {
         LOGF("mdns: announce failed (errno=%d)\n", errno);
-    else
-        LOGF("mdns: announced %zd bytes as %s\n", sent, cfg->host);
+        return false;
+    }
+    LOGF("mdns: announced %zd bytes as %s\n", sent, cfg->host);
+    return true;
 }
 
 void mdns_close(int fd) {
