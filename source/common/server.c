@@ -2,6 +2,7 @@
 #include "http.h"
 #include "input.h"
 #include "mdns.h"
+#include "netif.h"
 #include "oauth.h"
 #include "power.h"
 #include "routes.h"
@@ -119,6 +120,17 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
     if (!mdns_ready)
         LOGF("server: mDNS: local IP not yet known; will retry\n");
 
+    // Pending unsolicited announcements. Set when the mDNS socket (re)opens
+    // and decremented only when a send actually succeeds, so we keep retrying
+    // across the seconds it can take for routing to come up after the network
+    // changes (sends fail with EHOSTUNREACH until then) instead of giving up.
+    int mdns_announce_left = 0;
+
+    // Throttle for the periodic nifm IP-change check (the reliable backstop;
+    // the connectivity event can fire before the address has settled or be
+    // missed entirely). The loop spins ~every 100ms; check every ~2s.
+    int netcheck_ticks = 0;
+
     // Let the http I/O layer drive the idle callback during transfers too.
     http_set_idle_callback(idle);
 
@@ -163,6 +175,32 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             continue;
         }
 
+        // React to network connectivity changes (wifi connect/disconnect,
+        // airplane mode, DHCP renewal) by polling nifm for our current IP every
+        // ~2s and acting when it changes. (We tested nifm's connectivity event
+        // on hardware; on an unsubmitted request it never fires, so polling is
+        // the actual working trigger.) The check runs only while awake, so no
+        // nifm IPC ever hits the sleep window. On an IP change we rebuild BOTH
+        // sockets: a network teardown invalidates them, and the listener can
+        // otherwise silently stop accepting (poll() doesn't always report it)
+        // while mDNS keeps working, leaving the API unreachable on a live
+        // console.
+        if (++netcheck_ticks >= 20) { // ~2s at 100ms/iteration
+            netcheck_ticks = 0;
+            if (netif_ipv4_changed()) {
+                LOGF("server: IP changed; rebuilding sockets\n");
+                if (listen_fd >= 0) {
+                    close(listen_fd);
+                    listen_fd = -1;
+                }
+                if (mdns_fd >= 0) {
+                    mdns_close(mdns_fd);
+                    mdns_fd = -1;
+                }
+                mdns_ready = false; // re-query the IP on the next iteration
+            }
+        }
+
         if (listen_fd < 0) {
             listen_fd = create_listener(cfg->port);
             if (listen_fd < 0) {
@@ -186,9 +224,19 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
                 mdns_fd = mdns_open(&mdns_cfg);
                 if (mdns_fd >= 0) {
                     LOGF("server: mDNS up as %s\n", mdns_cfg.host);
-                    mdns_announce(mdns_fd, &mdns_cfg);
+                    mdns_announce_left = 3; // sent once routing is up (below)
                 }
             }
+        }
+
+        // Send pending announcements, one per loop iteration, but only count
+        // an announcement as sent when sendto() actually succeeds. Right after
+        // a network change, routing isn't up yet and sends fail with
+        // EHOSTUNREACH; retrying each iteration means we keep trying for as
+        // long as it takes rather than burning the burst on dead sends.
+        if (mdns_fd >= 0 && mdns_announce_left > 0) {
+            if (mdns_announce(mdns_fd, &mdns_cfg))
+                mdns_announce_left--;
         }
 
         struct pollfd pfds[2];

@@ -4,14 +4,22 @@
 #include <switch.h>
 #include <netinet/in.h>
 
+#include "log.h"
+
 static bool g_nifm_ready;
+static bool g_have_last_addr;
+static uint32_t g_last_addr; // last sampled s_addr (0 = none/loopback)
 
 bool netif_init(void) {
     if (g_nifm_ready)
         return true;
     Result rc = nifmInitialize(NifmServiceType_User);
-    g_nifm_ready = R_SUCCEEDED(rc);
-    return g_nifm_ready;
+    if (R_FAILED(rc)) {
+        LOGF("netif: nifmInitialize failed rc=0x%x\n", rc);
+        return false;
+    }
+    g_nifm_ready = true;
+    return true;
 }
 
 void netif_exit(void) {
@@ -35,10 +43,28 @@ bool netif_current_ipv4(uint32_t *out_s_addr) {
     return true;
 }
 
+bool netif_ipv4_changed(void) {
+    if (!g_nifm_ready)
+        return false;
+    uint32_t cur = 0; // 0 means no usable address right now
+    netif_current_ipv4(&cur);
+    if (!g_have_last_addr) {
+        g_have_last_addr = true;
+        g_last_addr = cur;
+        return false; // baseline
+    }
+    if (cur != g_last_addr) {
+        g_last_addr = cur;
+        return true;
+    }
+    return false;
+}
+
 #else // host / test build
 
 bool netif_init(void) { return false; }
 void netif_exit(void) {}
+bool netif_ipv4_changed(void) { return false; }
 
 bool netif_current_ipv4(uint32_t *out_s_addr) {
     // 127.0.0.1 in network byte order, for deterministic host tests.

@@ -73,7 +73,10 @@ int mdns_open(const MdnsConfig *cfg);
 void mdns_handle_readable(int fd, const MdnsConfig *cfg);
 
 // Sends an unsolicited announcement to the multicast group.
-void mdns_announce(int fd, const MdnsConfig *cfg);
+// Sends an unsolicited announcement to the multicast group. Returns true if
+// the datagram was sent (false if the network isn't routable yet), so callers
+// can retry until an announcement actually goes out.
+bool mdns_announce(int fd, const MdnsConfig *cfg);
 
 // Closes the socket (dropping group membership). Safe with fd < 0.
 void mdns_close(int fd);
