@@ -15,6 +15,8 @@ went stale after connectivity changes.
 - Unsolicited announcements now retry until a send actually succeeds, instead
   of giving up while routing is still coming up after the network returns.
 
-Sleep-safety preserved: the nifm request is created only to obtain its event
-and is never submitted (a submitted request hangs wake), and no nifm IPC is
-issued during the sleep transition.
+Sleep-safety: the nifm request is created only to obtain its event and is not
+submitted (we don't need active network demand), and no nifm IPC is issued
+during the sleep transition. The only confirmed sleep/wake hazard is
+filesystem I/O during the transition (fixed separately by suspending the log
+sink); the IP-change poll runs only while awake.

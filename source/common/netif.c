@@ -22,9 +22,9 @@ bool netif_init(void) {
     }
     g_nifm_ready = true;
 
-    // Create a request purely to obtain its connectivity-change event. We do
-    // NOT submit it: a submitted request holds the network connection up and
-    // hangs the PSC wake sequence. Creating it only gets the event handles.
+    // Create a request purely to obtain its connectivity-change event handle.
+    // We do not submit it: submitting expresses active network demand, which
+    // we don't need for passive change notification.
     rc = nifmCreateRequest(&g_request, true /* autoclear */);
     if (R_SUCCEEDED(rc)) {
         g_request_ready = true;

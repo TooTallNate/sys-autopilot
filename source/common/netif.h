@@ -12,11 +12,15 @@
 // re-announced exactly when the network changes (wifi connect/disconnect,
 // airplane mode, DHCP renewal) rather than guessing from sleep/wake.
 //
-// SLEEP SAFETY: a *submitted* nifm request holds the network up and hangs the
-// PSC wake sequence, so we create the request only to obtain its event and
-// never submit it. Polling the event is a local kernel wait (no IPC). The
-// nifm IPC (nifmGetCurrentIpAddress) must never be issued during the sleep
-// transition; the server gates that to the awake state.
+// We create the request only to obtain its event handle and do not submit it:
+// submitting expresses active network demand (keeps the connection up), which
+// we don't need for passive change notification. Polling the event is a local
+// kernel wait, not a nifm IPC.
+//
+// SLEEP SAFETY: the one confirmed sleep/wake hazard is doing filesystem I/O
+// during the PSC transition (the log sink, handled separately). As a
+// precaution we also keep nifm IPC (nifmGetCurrentIpAddress) out of the sleep
+// window by only checking connectivity while awake.
 
 // Initializes nifm and creates (without submitting) a request whose system
 // event signals on connectivity changes. MUST be called from __appInit while
