@@ -130,7 +130,12 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
         // socket I/O, nothing is in flight when we acknowledge here.
         PowerEvent pe = power_poll();
         if (pe == PowerEvent_Sleep) {
+            // Log BEFORE suspending the sink, then block all further file I/O:
+            // no fsp-srv (or bsd) IPC may occur between this point and the wake
+            // notification, or the console hangs on wake. The log sink writes
+            // to the SD card, so it must stay silent across the whole window.
             LOGF("server: power: sleeping, releasing sockets + HDLS\n");
+            log_set_suspended(true);
             if (listen_fd >= 0) {
                 close(listen_fd);
                 listen_fd = -1;
@@ -145,9 +150,11 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             suspended = true;
             power_ack();
         } else if (pe == PowerEvent_Wake) {
-            LOGF("server: power: awake\n");
             power_ack();
             suspended = false;
+            // Safe to touch the SD card again now that we are awake.
+            log_set_suspended(false);
+            LOGF("server: power: awake\n");
         }
         if (suspended) {
             if (idle && !idle())
