@@ -176,21 +176,17 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
         }
 
         // React to network connectivity changes (wifi connect/disconnect,
-        // airplane mode, DHCP renewal). Two triggers, both checked only while
-        // awake so no nifm IPC ever hits the sleep window:
-        //   1. nifm's connectivity event — fast, but can fire before the
-        //      address has settled (or be missed), and
-        //   2. a periodic IP-change poll (~2s) — the reliable backstop that
-        //      catches whatever the event misses and confirms the address.
-        // Either way, if the IP actually changed we rebuild BOTH sockets: a
-        // network teardown invalidates them, and the listener can otherwise
-        // silently stop accepting (poll() doesn't always report it) while mDNS
-        // keeps working, leaving the API unreachable on a live console.
-        bool event = netif_connectivity_changed();
-        bool periodic = (++netcheck_ticks >= 20); // ~2s at 100ms/iteration
-        if (periodic)
+        // airplane mode, DHCP renewal) by polling nifm for our current IP every
+        // ~2s and acting when it changes. (We tested nifm's connectivity event
+        // on hardware; on an unsubmitted request it never fires, so polling is
+        // the actual working trigger.) The check runs only while awake, so no
+        // nifm IPC ever hits the sleep window. On an IP change we rebuild BOTH
+        // sockets: a network teardown invalidates them, and the listener can
+        // otherwise silently stop accepting (poll() doesn't always report it)
+        // while mDNS keeps working, leaving the API unreachable on a live
+        // console.
+        if (++netcheck_ticks >= 20) { // ~2s at 100ms/iteration
             netcheck_ticks = 0;
-        if (event || periodic) {
             if (netif_ipv4_changed()) {
                 LOGF("server: IP changed; rebuilding sockets\n");
                 if (listen_fd >= 0) {

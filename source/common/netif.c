@@ -7,8 +7,6 @@
 #include "log.h"
 
 static bool g_nifm_ready;
-static NifmRequest g_request;
-static bool g_request_ready;
 static bool g_have_last_addr;
 static uint32_t g_last_addr; // last sampled s_addr (0 = none/loopback)
 
@@ -21,36 +19,14 @@ bool netif_init(void) {
         return false;
     }
     g_nifm_ready = true;
-
-    // Create a request purely to obtain its connectivity-change event handle.
-    // We do not submit it: submitting expresses active network demand, which
-    // we don't need for passive change notification.
-    rc = nifmCreateRequest(&g_request, true /* autoclear */);
-    if (R_SUCCEEDED(rc)) {
-        g_request_ready = true;
-    } else {
-        LOGF("netif: nifmCreateRequest failed rc=0x%x\n", rc);
-    }
     return true;
 }
 
 void netif_exit(void) {
-    if (g_request_ready) {
-        nifmRequestClose(&g_request);
-        g_request_ready = false;
-    }
     if (g_nifm_ready) {
         nifmExit();
         g_nifm_ready = false;
     }
-}
-
-bool netif_connectivity_changed(void) {
-    if (!g_request_ready)
-        return false;
-    // Local kernel wait (timeout 0), not a nifm IPC. The event autoclears, so
-    // a successful wait both reports and consumes the change notification.
-    return R_SUCCEEDED(eventWait(&g_request.event_request_state, 0));
 }
 
 bool netif_current_ipv4(uint32_t *out_s_addr) {
@@ -88,7 +64,6 @@ bool netif_ipv4_changed(void) {
 
 bool netif_init(void) { return false; }
 void netif_exit(void) {}
-bool netif_connectivity_changed(void) { return false; }
 bool netif_ipv4_changed(void) { return false; }
 
 bool netif_current_ipv4(uint32_t *out_s_addr) {
