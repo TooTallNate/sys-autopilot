@@ -26,6 +26,10 @@ cc $CFLAGS -o "$OUT/test_mdns" test_mdns.c \
     "$SRC/mdns.c" "$SRC/device_info.c" "$SRC/config.c" "$SRC/netif.c"
 "$OUT/test_mdns"
 
+echo "== test_install =="
+cc $CFLAGS -o "$OUT/test_install" test_install.c "$SRC/install.c"
+"$OUT/test_install"
+
 echo "== test_oauth =="
 cc $CFLAGS \
     -DOAUTH_TOKENS_PATH="\"$FAKE_SD-tokens.txt\"" \

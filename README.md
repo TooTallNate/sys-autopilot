@@ -280,6 +280,34 @@ curl "http://<ip>:4150/files/hash?path=/switch/myapp.nro"
 curl "http://<ip>:4150/files?path=/switch/myapp/debug.log&offset=-2048"
 ```
 
+### Install a title
+
+Stream an **NSP** straight to the console and install it (NCM content storage +
+application record) — no SD-card staging, nothing to clean up afterwards. The
+title appears on the HOME menu when done.
+
+```
+POST|PUT /install[?storage=sd|nand]    install a streamed NSP (default: sd)
+```
+
+```sh
+# -g disables curl globbing so the [titleId] brackets in the name are literal.
+curl -g -T "Game [0100...000][v0].nsp" "http://<ip>:4150/install"
+# -> {"ok":true,"titleId":"0100...000","version":0,"message":"installed ..."}
+
+# install to internal storage instead of the SD card:
+curl -g -T game.nsp "http://<ip>:4150/install?storage=nand"
+```
+
+The NSP is streamed (its size comes from `Content-Length`, which `curl -T`
+sends), so multi-GB titles install without buffering to disk. Each NCA's
+SHA-256 is verified against its content id as it is written, and a failed
+install rolls back the content it wrote.
+
+> **NSP only** for now (compressed **NSZ** is not yet supported). Installing
+> commercial titles still requires a valid ticket and, for some games, a linked
+> account — that is the title's own DRM, independent of the installer.
+
 ### Status
 
 ```
@@ -361,13 +389,15 @@ source/common/         shared server core
   input.c              HDLS virtual Pro Controller
   files.c              SD card file/directory endpoints + helpers
   settings.c           system settings (theme/nickname/brightness/volume/battery)
+  install.c            streamed NSP installer (PFS0 parse + NCM + content-meta)
+  nx_ext.c             ns/es IPC wrappers libnx doesn't expose (record/ticket)
 lib/jsmn/              vendored JSON tokenizer (MIT)
 app/                   dev .nro flavor
 tests/                 host-side test suite (./tests/run.sh)
 scripts/discover.sh    find consoles on the LAN via DNS-SD (dns-sd/avahi)
 sys-autopilot.json     NPDM descriptor (title ID 4200000000004150, services:
                        bsd:u caps:sc hid:dbg set:sys fsp-srv spl: nifm:u
-                       lbl audctl psm ...)
+                       lbl audctl psm ncm ns:am2 es ...)
 ```
 
 ## Releases & contributing

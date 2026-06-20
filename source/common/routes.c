@@ -2,6 +2,7 @@
 #include "apiargs.h"
 #include "files.h"
 #include "input.h"
+#include "install.h"
 #include "json.h"
 #include "mcp.h"
 #include "oauth.h"
@@ -365,6 +366,41 @@ static void handle_settings_datetime(HttpRequest *req) {
                        dt.timezone);
 }
 
+// --- /install ----------------------------------------------------------------
+
+// Adapts the HTTP request body into the installer's sequential read callback.
+static long install_body_read(void *ctx, void *buf, size_t len) {
+    return (long)http_read_body((HttpRequest *)ctx, buf, len);
+}
+
+static void handle_install(HttpRequest *req) {
+    if (!req->has_content_length) {
+        http_send_error(req->fd, 411, "Content-Length required (stream the NSP with curl -T)");
+        return;
+    }
+
+    // ?storage=sd|nand (default sd)
+    InstallStorage storage = INSTALL_STORAGE_SD;
+    char sval[8];
+    if (http_query_get(req, "storage", sval, sizeof(sval)) &&
+        strcasecmp(sval, "nand") == 0)
+        storage = INSTALL_STORAGE_NAND;
+
+    InstallResult res;
+    install_nsp_stream(install_body_read, req, req->content_length, storage, &res);
+
+    char esc[256];
+    json_escape(res.message, strlen(res.message), esc, sizeof(esc));
+    if (res.ok) {
+        http_send_json(req->fd, 200,
+                       "{\"ok\":true,\"titleId\":\"%016llx\",\"version\":%u,\"message\":\"%s\"}",
+                       (unsigned long long)res.title_id, res.version, esc);
+    } else {
+        http_send_json(req->fd, res.http_status ? res.http_status : 500,
+                       "{\"ok\":false,\"error\":\"%s\"}", esc);
+    }
+}
+
 // --- /power/* ------------------------------------------------------------------
 
 static void handle_power(HttpRequest *req, PowerAction action, const char *note) {
@@ -417,6 +453,8 @@ static const Route kRoutes[] = {
     { "GET",    "/files/hash",        files_handle_hash },
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
+    { "POST",   "/install",           handle_install },
+    { "PUT",    "/install",           handle_install },
     { "POST",   "/mcp",               mcp_handle_post },
     { "POST",   "/power/sleep",       handle_power_sleep },
     { "POST",   "/power/restart",     handle_power_restart },
