@@ -94,7 +94,8 @@ tools = [
     },
     {
         "name": "status",
-        "description": "Get server status: version, console firmware, virtual controller state, uptime.",
+        "description": ("Get server status: version, console firmware, virtual controller state, "
+                        "uptime, and battery percentage / charging state."),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -190,6 +191,105 @@ tools = [
                         "unreachable - a human must physically press the power button to turn "
                         "the console back on. Only use when explicitly asked to."),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_theme",
+        "description": "Get the system UI theme. Returns \"light\" or \"dark\".",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_theme",
+        "description": ("Set the system UI theme (light or dark mode). NOTE: this updates the "
+                        "stored setting immediately, but the HOME menu only re-reads it when it "
+                        "reloads - so the visible change takes effect after sleep/wake or a "
+                        "reboot, not instantly."),
+        "inputSchema": {"type": "object", "properties": {
+            "theme": {"type": "string", "enum": ["light", "dark"]},
+        }, "required": ["theme"]},
+    },
+    {
+        "name": "get_nickname",
+        "description": "Get the console's device nickname (the name shown on the network and in settings).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_nickname",
+        "description": "Set the console's device nickname.",
+        "inputSchema": {"type": "object", "properties": {
+            "nickname": {"type": "string", "description": "New device nickname (max ~127 bytes)."},
+        }, "required": ["nickname"]},
+    },
+    {
+        "name": "get_brightness",
+        "description": "Get the current screen brightness as a value from 0.0 (dimmest) to 1.0 (brightest).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_brightness",
+        "description": ("Set the screen brightness and apply it immediately. Note: if the console "
+                        "has auto-brightness enabled it may adjust again on its own."),
+        "inputSchema": {"type": "object", "properties": {
+            "brightness": {"type": "number", "description": "0.0 (dimmest) to 1.0 (brightest)."},
+        }, "required": ["brightness"]},
+    },
+    {
+        "name": "get_volume",
+        "description": "Get the current master volume as a value from 0.0 (muted) to 1.0 (max).",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_volume",
+        "description": "Set the master volume.",
+        "inputSchema": {"type": "object", "properties": {
+            "volume": {"type": "number", "description": "0.0 (muted) to 1.0 (max)."},
+        }, "required": ["volume"]},
+    },
+    {
+        "name": "airplane_mode",
+        "description": ("Enable airplane mode (disable all wireless). WARNING: this disconnects "
+                        "the console from the network, so the server becomes unreachable "
+                        "immediately and CANNOT be re-enabled remotely - a human must turn "
+                        "wireless back on from the console. There is no remote 'disable airplane "
+                        "mode' for that reason. Only use when explicitly asked to."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_auto_time",
+        "description": ("Get whether the clock is automatically synchronized over the internet. "
+                        "Returns \"enabled\" or \"disabled\"."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_auto_time",
+        "description": ("Enable or disable automatic internet clock synchronization. Disable it "
+                        "before setting the clock manually with set_datetime, or the manual time "
+                        "is overwritten."),
+        "inputSchema": {"type": "object", "properties": {
+            "enabled": {"type": "boolean"},
+        }, "required": ["enabled"]},
+    },
+    {
+        "name": "get_datetime",
+        "description": ("Get the console's current local date, time, and timezone. Returns "
+                        "\"YYYY-MM-DD HH:MM:SS <timezone>\"."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_datetime",
+        "description": ("Set the console's clock. Provide any subset of date/time fields; "
+                        "omitted ones keep their current value. The time is interpreted in the "
+                        "console's current timezone. (The timezone itself can't be changed "
+                        "remotely; set the date/time only.) If internet time sync is on, the OS "
+                        "may later re-sync - call set_auto_time(false) first to make a manual "
+                        "time stick."),
+        "inputSchema": {"type": "object", "properties": {
+            "year":   {"type": "integer", "description": "e.g. 2026"},
+            "month":  {"type": "integer", "description": "1-12"},
+            "day":    {"type": "integer", "description": "1-31"},
+            "hour":   {"type": "integer", "description": "0-23"},
+            "minute": {"type": "integer", "description": "0-59"},
+            "second": {"type": "integer", "description": "0-59"},
+        }},
     },
 ]
 

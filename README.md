@@ -192,12 +192,17 @@ Details:
 | `hold_buttons` / `release_buttons` | Persistent button state |
 | `set_stick` | Analog stick (`side`, `x`/`y` in -1..1, optional `durationMs`) |
 | `clear_input` | Release everything, recenter sticks |
-| `status` | Server version, firmware, controller state, uptime |
+| `status` | Server version, firmware, controller state, uptime, battery % / charging |
 | `list_directory` | JSON listing of an SD card directory |
 | `read_file` | Read text files (32 KB pages, negative `offset` = tail) — ideal for logs |
 | `upload_file` | Write a file (base64 `content`, **streamed to SD — no size cap**) |
 | `delete_file` | Delete a file / empty directory |
 | `hash_file` | SHA-256 a file (streamed, any size); optional `expected` returns `matched` — verify an upload in one call |
+| `get_theme` / `set_theme` | Read / set the system UI theme (`light` or `dark`; the visible change applies after the HOME menu reloads — sleep/wake or reboot) |
+| `get_nickname` / `set_nickname` | Read / set the console's device nickname |
+| `get_brightness` / `set_brightness` | Read / set screen brightness (`0.0`–`1.0`) |
+| `get_volume` / `set_volume` | Read / set master volume (`0.0`–`1.0`) |
+| `airplane_mode` | Enable airplane mode (disable wireless). **One-way: cuts the server off; cannot be undone remotely** |
 
 Button names: `A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT LSTICK RSTICK
 HOME CAPTURE` (aliases: `START`, `SELECT`, `DUP/DDOWN/DLEFT/DRIGHT`).
@@ -282,8 +287,44 @@ GET /status
 ```
 
 ```json
-{"version":"1.1.0","firmware":"19.0.1","controllerAttached":true,"uptimeSeconds":4242}
+{"version":"1.1.0","firmware":"19.0.1","controllerAttached":true,"uptimeSeconds":4242,"batteryPercent":87,"charging":true}
 ```
+
+`batteryPercent`/`charging` are included when the battery service is available.
+
+### System settings
+
+```
+GET  /settings/theme                      -> {"theme":"light"|"dark"}
+POST /settings/theme       {"theme":"dark"}
+GET  /settings/nickname                    -> {"nickname":"..."}
+POST /settings/nickname    {"nickname":"Living Room"}
+GET  /settings/brightness                  -> {"brightness":0.5}   (0.0-1.0)
+POST /settings/brightness  {"brightness":0.8}
+GET  /settings/volume                      -> {"volume":0.5}       (0.0-1.0)
+POST /settings/volume      {"volume":0.3}
+POST /settings/airplane    (empty body)    disable wireless (one-way)
+GET  /settings/auto-time                   -> {"autoTime":true}
+POST /settings/auto-time   {"autoTime":false}
+GET  /settings/datetime                    -> {"year":2026,...,"timezone":"America/New_York"}
+POST /settings/datetime    {"year":2026,"month":6,"day":19,"hour":14,"minute":30,"timezone":"America/New_York"}
+```
+
+`POST /settings/datetime` accepts any subset of fields (omitted ones keep their
+current value), interprets the time in the given/current timezone, and disables
+internet time sync so the manual value sticks. `theme` updates the stored
+setting immediately but the HOME menu only shows it after it reloads
+(sleep/wake or reboot).
+
+```sh
+curl -X POST "http://<ip>:4150/settings/theme" \
+     -H 'Content-Type: application/json' -d '{"theme":"dark"}'
+curl "http://<ip>:4150/settings/brightness"
+```
+
+> `POST /settings/airplane` disables all wireless and is **one-way**: the
+> server becomes unreachable and wireless must be re-enabled physically on the
+> console. There is intentionally no remote re-enable.
 
 ## Dev flavor (.nro)
 
@@ -319,12 +360,14 @@ source/common/         shared server core
   screen.c             caps:sc JPEG capture
   input.c              HDLS virtual Pro Controller
   files.c              SD card file/directory endpoints + helpers
+  settings.c           system settings (theme/nickname/brightness/volume/battery)
 lib/jsmn/              vendored JSON tokenizer (MIT)
 app/                   dev .nro flavor
 tests/                 host-side test suite (./tests/run.sh)
 scripts/discover.sh    find consoles on the LAN via DNS-SD (dns-sd/avahi)
-sys-autopilot.json     NPDM descriptor (title ID 4200000000004150,
-                       services: bsd:u, caps:sc, hid:dbg, set:sys, fsp-srv, spl:)
+sys-autopilot.json     NPDM descriptor (title ID 4200000000004150, services:
+                       bsd:u caps:sc hid:dbg set:sys fsp-srv spl: nifm:u
+                       lbl audctl psm ...)
 ```
 
 ## Releases & contributing

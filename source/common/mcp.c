@@ -10,8 +10,11 @@
 #include "jstream.h"
 #include "routes.h"
 #include "screen.h"
+#include "settings.h"
 #include "log.h"
 #include "mcp_tools.h"
+
+#include <strings.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -359,13 +362,19 @@ static void tool_set_stick(HttpRequest *req, const char *id, const JsonDoc *doc,
 
 static void tool_status(HttpRequest *req, const char *id) {
     u32 ver = hosversionGet();
-    char text[192];
-    snprintf(text, sizeof(text),
+    char text[256];
+    int n = snprintf(text, sizeof(text),
              "version: %s\nfirmware: %u.%u.%u\ncontrollerAttached: %s\nuptimeSeconds: %llu",
              routes_app_version(),
              HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
              input_is_attached() ? "true" : "false",
              (unsigned long long)routes_uptime_seconds());
+    uint32_t pct = 0;
+    bool charging = false;
+    if (n > 0 && (size_t)n < sizeof(text) && settings_get_battery(&pct, &charging))
+        snprintf(text + n, sizeof(text) - (size_t)n,
+                 "\nbatteryPercent: %u\ncharging: %s",
+                 pct, charging ? "true" : "false");
     send_tool_ok(req->fd, id, text);
 }
 
@@ -619,6 +628,185 @@ static void tool_revoke_token(HttpRequest *req, const char *id,
     send_tool_ok(req->fd, id, "token revoked");
 }
 
+// --- system settings tools ---------------------------------------------------
+
+static void tool_get_theme(HttpRequest *req, const char *id) {
+    bool dark = false;
+    if (!settings_get_theme(&dark)) {
+        send_tool_error(req->fd, id, "failed to read theme");
+        return;
+    }
+    send_tool_ok(req->fd, id, dark ? "dark" : "light");
+}
+
+static void tool_set_theme(HttpRequest *req, const char *id,
+                           const JsonDoc *doc, int args) {
+    char val[16] = {0};
+    int t = json_obj_get(doc, args, "theme");
+    if (t < 0 || !json_get_string(doc, t, val, sizeof(val))) {
+        send_tool_error(req->fd, id, "missing 'theme' (\"light\" or \"dark\")");
+        return;
+    }
+    bool dark;
+    if (strcasecmp(val, "dark") == 0)       dark = true;
+    else if (strcasecmp(val, "light") == 0) dark = false;
+    else { send_tool_error(req->fd, id, "'theme' must be \"light\" or \"dark\""); return; }
+
+    if (!settings_set_theme(dark))
+        send_tool_error(req->fd, id, "failed to set theme");
+    else
+        send_tool_ok(req->fd, id,
+                     dark ? "theme set to dark (applies after the HOME menu reloads — "
+                            "sleep/wake or reboot)"
+                          : "theme set to light (applies after the HOME menu reloads — "
+                            "sleep/wake or reboot)");
+}
+
+static void tool_get_nickname(HttpRequest *req, const char *id) {
+    char name[128] = {0};
+    if (!settings_get_nickname(name, sizeof(name)))
+        send_tool_error(req->fd, id, "failed to read nickname");
+    else
+        send_tool_ok(req->fd, id, name);
+}
+
+static void tool_set_nickname(HttpRequest *req, const char *id,
+                              const JsonDoc *doc, int args) {
+    char name[128] = {0};
+    int t = json_obj_get(doc, args, "nickname");
+    if (t < 0 || !json_get_string(doc, t, name, sizeof(name)) || name[0] == '\0') {
+        send_tool_error(req->fd, id, "missing non-empty 'nickname'");
+        return;
+    }
+    if (!settings_set_nickname(name))
+        send_tool_error(req->fd, id, "failed to set nickname");
+    else {
+        char msg[160];
+        snprintf(msg, sizeof(msg), "nickname set to: %s", name);
+        send_tool_ok(req->fd, id, msg);
+    }
+}
+
+// Shared get/set for the normalized 0..1 float settings (brightness, volume).
+static void tool_get_float(HttpRequest *req, const char *id, const char *label,
+                           bool (*get)(float *)) {
+    float v = 0.0f;
+    if (!get(&v)) {
+        send_tool_error(req->fd, id, "failed to read setting");
+        return;
+    }
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%s: %.2f", label, v);
+    send_tool_ok(req->fd, id, msg);
+}
+
+static void tool_set_float(HttpRequest *req, const char *id, const JsonDoc *doc,
+                           int args, const char *key, const char *label,
+                           bool (*set)(float)) {
+    int t = json_obj_get(doc, args, key);
+    double v;
+    if (t < 0 || !json_get_double(doc, t, &v)) {
+        char err[80];
+        snprintf(err, sizeof(err), "missing numeric '%s' (0.0 - 1.0)", key);
+        send_tool_error(req->fd, id, err);
+        return;
+    }
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+    if (!set((float)v)) {
+        send_tool_error(req->fd, id, "failed to set setting");
+        return;
+    }
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%s set to %.2f", label, v);
+    send_tool_ok(req->fd, id, msg);
+}
+
+static void tool_airplane_mode(HttpRequest *req, const char *id) {
+    if (!settings_disable_wireless()) {
+        send_tool_error(req->fd, id, "failed to disable wireless");
+        return;
+    }
+    send_tool_ok(req->fd, id,
+                 "wireless disabled. NOTE: the server is now unreachable until "
+                 "wireless is re-enabled physically on the console.");
+}
+
+static void tool_get_auto_time(HttpRequest *req, const char *id) {
+    bool en = false;
+    if (!settings_get_auto_time(&en))
+        send_tool_error(req->fd, id, "failed to read auto-time");
+    else
+        send_tool_ok(req->fd, id, en ? "enabled" : "disabled");
+}
+
+static void tool_set_auto_time(HttpRequest *req, const char *id,
+                               const JsonDoc *doc, int args) {
+    int t = json_obj_get(doc, args, "enabled");
+    bool en;
+    if (t < 0 || !json_get_bool(doc, t, &en)) {
+        send_tool_error(req->fd, id, "missing boolean 'enabled'");
+        return;
+    }
+    if (!settings_set_auto_time(en))
+        send_tool_error(req->fd, id, "failed to set auto-time");
+    else
+        send_tool_ok(req->fd, id, en ? "internet time sync enabled"
+                                     : "internet time sync disabled");
+}
+
+static void tool_get_datetime(HttpRequest *req, const char *id) {
+    DateTime dt = {0};
+    if (!settings_get_datetime(&dt)) {
+        send_tool_error(req->fd, id, "failed to read date/time");
+        return;
+    }
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+             "%04d-%02d-%02d %02d:%02d:%02d %s",
+             dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+             dt.timezone);
+    send_tool_ok(req->fd, id, msg);
+}
+
+static int dt_field(const JsonDoc *doc, int args, const char *key, int def) {
+    int t = json_obj_get(doc, args, key);
+    long long v;
+    if (t >= 0 && json_get_int(doc, t, &v))
+        return (int)v;
+    return def;
+}
+
+static void tool_set_datetime(HttpRequest *req, const char *id,
+                              const JsonDoc *doc, int args) {
+    // Start from the current value so callers may set only some fields.
+    DateTime dt = {0};
+    settings_get_datetime(&dt);
+    dt.year   = dt_field(doc, args, "year",   dt.year);
+    dt.month  = dt_field(doc, args, "month",  dt.month);
+    dt.day    = dt_field(doc, args, "day",    dt.day);
+    dt.hour   = dt_field(doc, args, "hour",   dt.hour);
+    dt.minute = dt_field(doc, args, "minute", dt.minute);
+    dt.second = dt_field(doc, args, "second", dt.second);
+
+    if (dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31 ||
+        dt.hour < 0 || dt.hour > 23 || dt.minute < 0 || dt.minute > 59 ||
+        dt.second < 0 || dt.second > 59 || dt.year < 2000 || dt.year > 2100) {
+        send_tool_error(req->fd, id, "invalid date/time fields");
+        return;
+    }
+    if (!settings_set_datetime(&dt)) {
+        send_tool_error(req->fd, id, "failed to set the clock");
+        return;
+    }
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "clock set to %04d-%02d-%02d %02d:%02d:%02d %s",
+             dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+             dt.timezone);
+    send_tool_ok(req->fd, id, msg);
+}
+
 static void tool_power(HttpRequest *req, const char *id, PowerAction action,
                        const char *ok_msg) {
     if (!power_actions_available()) {
@@ -691,6 +879,23 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
         tool_power(req, id, PowerAction_PowerOff,
                    "powering off; a human must press the power button to turn "
                    "the console back on");
+    else if (strcmp(name, "get_theme") == 0)        tool_get_theme(req, id);
+    else if (strcmp(name, "set_theme") == 0)        tool_set_theme(req, id, doc, args);
+    else if (strcmp(name, "get_nickname") == 0)     tool_get_nickname(req, id);
+    else if (strcmp(name, "set_nickname") == 0)     tool_set_nickname(req, id, doc, args);
+    else if (strcmp(name, "get_brightness") == 0)
+        tool_get_float(req, id, "brightness", settings_get_brightness);
+    else if (strcmp(name, "set_brightness") == 0)
+        tool_set_float(req, id, doc, args, "brightness", "brightness", settings_set_brightness);
+    else if (strcmp(name, "get_volume") == 0)
+        tool_get_float(req, id, "volume", settings_get_volume);
+    else if (strcmp(name, "set_volume") == 0)
+        tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
+    else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
+    else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);
+    else if (strcmp(name, "set_auto_time") == 0)    tool_set_auto_time(req, id, doc, args);
+    else if (strcmp(name, "get_datetime") == 0)     tool_get_datetime(req, id);
+    else if (strcmp(name, "set_datetime") == 0)     tool_set_datetime(req, id, doc, args);
     else send_rpc_error(req->fd, id, -32602, "unknown tool");
 }
 
