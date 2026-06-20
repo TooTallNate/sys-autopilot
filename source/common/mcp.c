@@ -769,6 +769,44 @@ static void tool_get_datetime(HttpRequest *req, const char *id) {
     send_tool_ok(req->fd, id, msg);
 }
 
+static int dt_field(const JsonDoc *doc, int args, const char *key, int def) {
+    int t = json_obj_get(doc, args, key);
+    long long v;
+    if (t >= 0 && json_get_int(doc, t, &v))
+        return (int)v;
+    return def;
+}
+
+static void tool_set_datetime(HttpRequest *req, const char *id,
+                              const JsonDoc *doc, int args) {
+    // Start from the current value so callers may set only some fields.
+    DateTime dt = {0};
+    settings_get_datetime(&dt);
+    dt.year   = dt_field(doc, args, "year",   dt.year);
+    dt.month  = dt_field(doc, args, "month",  dt.month);
+    dt.day    = dt_field(doc, args, "day",    dt.day);
+    dt.hour   = dt_field(doc, args, "hour",   dt.hour);
+    dt.minute = dt_field(doc, args, "minute", dt.minute);
+    dt.second = dt_field(doc, args, "second", dt.second);
+
+    if (dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31 ||
+        dt.hour < 0 || dt.hour > 23 || dt.minute < 0 || dt.minute > 59 ||
+        dt.second < 0 || dt.second > 59 || dt.year < 2000 || dt.year > 2100) {
+        send_tool_error(req->fd, id, "invalid date/time fields");
+        return;
+    }
+    if (!settings_set_datetime(&dt)) {
+        send_tool_error(req->fd, id, "failed to set the clock");
+        return;
+    }
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "clock set to %04d-%02d-%02d %02d:%02d:%02d %s",
+             dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+             dt.timezone);
+    send_tool_ok(req->fd, id, msg);
+}
+
 static void tool_power(HttpRequest *req, const char *id, PowerAction action,
                        const char *ok_msg) {
     if (!power_actions_available()) {
@@ -857,6 +895,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);
     else if (strcmp(name, "set_auto_time") == 0)    tool_set_auto_time(req, id, doc, args);
     else if (strcmp(name, "get_datetime") == 0)     tool_get_datetime(req, id);
+    else if (strcmp(name, "set_datetime") == 0)     tool_set_datetime(req, id, doc, args);
     else send_rpc_error(req->fd, id, -32602, "unknown tool");
 }
 

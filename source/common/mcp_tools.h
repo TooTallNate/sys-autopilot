@@ -125,6 +125,12 @@ static const char kMcpToolsJson[] =
     "e or disable automatic internet clock synchronization. Disable it before setting the clock manually "
     "with set_datetime, or the manual time is overwritten.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{"
     "\"enabled\":{\"type\":\"boolean\"}},\"required\":[\"enabled\"]}},{\"name\":\"get_datetime\",\"description\":\"Get the"
-    " console's current local date, time, and timezone. Returns \\\"YYYY-MM-DD HH:MM:SS <timezone>\\\". Read-"
-    "only: a background sysmodule cannot change the displayed clock.\",\"inputSchema\":{\"type\":\"object\",\"pro"
-    "perties\":{}}}]}";
+    " console's current local date, time, and timezone. Returns \\\"YYYY-MM-DD HH:MM:SS <timezone>\\\".\",\"inp"
+    "utSchema\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"set_datetime\",\"description\":\"Set the console's"
+    " clock. Provide any subset of date/time fields; omitted ones keep their current value. The time is i"
+    "nterpreted in the console's current timezone. (The timezone itself can't be changed remotely; set th"
+    "e date/time only.) If internet time sync is on, the OS may later re-sync - call set_auto_time(false)"
+    " first to make a manual time stick.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"year\":{\"type\":\"in"
+    "teger\",\"description\":\"e.g. 2026\"},\"month\":{\"type\":\"integer\",\"description\":\"1-12\"},\"day\":{\"type\":\"int"
+    "eger\",\"description\":\"1-31\"},\"hour\":{\"type\":\"integer\",\"description\":\"0-23\"},\"minute\":{\"type\":\"integer"
+    "\",\"description\":\"0-59\"},\"second\":{\"type\":\"integer\",\"description\":\"0-59\"}}}}]}";

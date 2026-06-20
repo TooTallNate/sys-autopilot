@@ -271,9 +271,25 @@ tools = [
     {
         "name": "get_datetime",
         "description": ("Get the console's current local date, time, and timezone. Returns "
-                        "\"YYYY-MM-DD HH:MM:SS <timezone>\". Read-only: a background sysmodule "
-                        "cannot change the displayed clock."),
+                        "\"YYYY-MM-DD HH:MM:SS <timezone>\"."),
         "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_datetime",
+        "description": ("Set the console's clock. Provide any subset of date/time fields; "
+                        "omitted ones keep their current value. The time is interpreted in the "
+                        "console's current timezone. (The timezone itself can't be changed "
+                        "remotely; set the date/time only.) If internet time sync is on, the OS "
+                        "may later re-sync - call set_auto_time(false) first to make a manual "
+                        "time stick."),
+        "inputSchema": {"type": "object", "properties": {
+            "year":   {"type": "integer", "description": "e.g. 2026"},
+            "month":  {"type": "integer", "description": "1-12"},
+            "day":    {"type": "integer", "description": "1-31"},
+            "hour":   {"type": "integer", "description": "0-23"},
+            "minute": {"type": "integer", "description": "0-59"},
+            "second": {"type": "integer", "description": "0-59"},
+        }},
     },
 ]
 

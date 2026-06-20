@@ -197,6 +197,33 @@ bool settings_get_datetime(DateTime *out) {
     return true;
 }
 
+bool settings_set_datetime(const DateTime *dt) {
+    // Convert the wall-clock fields (interpreted in the device's current
+    // timezone) to a POSIX timestamp.
+    TimeCalendarTime cal = {0};
+    cal.year   = (u16)dt->year;
+    cal.month  = (u8)dt->month;
+    cal.day    = (u8)dt->day;
+    cal.hour   = (u8)dt->hour;
+    cal.minute = (u8)dt->minute;
+    cal.second = (u8)dt->second;
+
+    u64 posix = 0;
+    s32 count = 0;
+    if (R_FAILED(timeToPosixTimeWithMyRule(&cal, &posix, 1, &count)) || count < 1)
+        return false;
+
+    // Write the NETWORK system clock: that's the one a sysmodule is permitted
+    // to set (the user/local clocks reject it with rc 0x274), and the displayed
+    // time follows it. Verified on hardware fixing a badly-skewed clock.
+    Result rc = timeSetCurrentTime(TimeType_NetworkSystemClock, posix);
+    if (R_FAILED(rc)) {
+        LOGF("settings: SetCurrentTime(Network) rc=0x%x\n", rc);
+        return false;
+    }
+    return true;
+}
+
 #else // host / test build: deterministic placeholders
 
 void settings_init(void) {}
@@ -234,5 +261,6 @@ bool settings_get_datetime(DateTime *out) {
     snprintf(out->timezone, sizeof(out->timezone), "America/New_York");
     return true;
 }
+bool settings_set_datetime(const DateTime *dt) { (void)dt; return true; }
 
 #endif

@@ -311,19 +311,58 @@ static void handle_settings_auto_time(HttpRequest *req) {
         http_send_json(req->fd, 200, "{\"ok\":true,\"autoTime\":%s}", en ? "true" : "false");
 }
 
+// Reads an integer field from a JSON object; returns def if absent/invalid.
+static int json_field_int(const JsonDoc *doc, int obj, const char *key, int def) {
+    int t = json_obj_get(doc, obj, key);
+    long long v;
+    if (t >= 0 && json_get_int(doc, t, &v))
+        return (int)v;
+    return def;
+}
+
 static void handle_settings_datetime(HttpRequest *req) {
-    // Read-only: a sysmodule cannot move the displayed clock (see settings.h).
-    DateTime dt = {0};
-    if (!settings_get_datetime(&dt)) {
-        http_send_error(req->fd, 500, "failed to read date/time");
+    if (strcmp(req->method, "GET") == 0) {
+        DateTime dt = {0};
+        if (!settings_get_datetime(&dt)) {
+            http_send_error(req->fd, 500, "failed to read date/time");
+            return;
+        }
+        http_send_json(req->fd, 200,
+                       "{\"year\":%d,\"month\":%d,\"day\":%d,"
+                       "\"hour\":%d,\"minute\":%d,\"second\":%d,"
+                       "\"timezone\":\"%s\"}",
+                       dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+                       dt.timezone);
         return;
     }
-    http_send_json(req->fd, 200,
-                   "{\"year\":%d,\"month\":%d,\"day\":%d,"
-                   "\"hour\":%d,\"minute\":%d,\"second\":%d,"
-                   "\"timezone\":\"%s\"}",
-                   dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
-                   dt.timezone);
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+
+    DateTime dt = {0};
+    settings_get_datetime(&dt);
+    dt.year   = json_field_int(&doc, root, "year",   dt.year);
+    dt.month  = json_field_int(&doc, root, "month",  dt.month);
+    dt.day    = json_field_int(&doc, root, "day",    dt.day);
+    dt.hour   = json_field_int(&doc, root, "hour",   dt.hour);
+    dt.minute = json_field_int(&doc, root, "minute", dt.minute);
+    dt.second = json_field_int(&doc, root, "second", dt.second);
+
+    if (dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31 ||
+        dt.hour < 0 || dt.hour > 23 || dt.minute < 0 || dt.minute > 59 ||
+        dt.second < 0 || dt.second > 59 || dt.year < 2000 || dt.year > 2100) {
+        http_send_error(req->fd, 400, "invalid date/time fields");
+        return;
+    }
+    if (!settings_set_datetime(&dt))
+        http_send_error(req->fd, 500, "failed to set the clock");
+    else
+        http_send_json(req->fd, 200,
+                       "{\"ok\":true,\"year\":%d,\"month\":%d,\"day\":%d,"
+                       "\"hour\":%d,\"minute\":%d,\"second\":%d,\"timezone\":\"%s\"}",
+                       dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+                       dt.timezone);
 }
 
 // --- /power/* ------------------------------------------------------------------
@@ -394,6 +433,7 @@ static const Route kRoutes[] = {
     { "GET",    "/settings/auto-time",    handle_settings_auto_time },
     { "POST",   "/settings/auto-time",    handle_settings_auto_time },
     { "GET",    "/settings/datetime",     handle_settings_datetime },
+    { "POST",   "/settings/datetime",     handle_settings_datetime },
     { "POST",   "/oauth/register",    oauth_handle_register },
     { "GET",    "/oauth/authorize",   oauth_handle_authorize_get },
     { "POST",   "/oauth/authorize",   oauth_handle_authorize_post },

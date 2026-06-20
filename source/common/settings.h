@@ -50,12 +50,8 @@ bool settings_get_battery(uint32_t *out_percent, bool *out_charging);
 bool settings_get_auto_time(bool *out_enabled);
 bool settings_set_auto_time(bool enabled);
 
-// --- date / time / timezone (read-only) ---------------------------------------
-// A wall-clock value in the device's timezone. Read-only: a background
-// sysmodule cannot move the displayed clock (the user clock rejects writes with
-// rc 0x274, and writing the network clock does not propagate to the displayed
-// time). Apps that can set the clock, e.g. QuickNTP, run as overlays in a
-// different permission context.
+// --- date / time / timezone ---------------------------------------------------
+// A wall-clock value in the device's timezone.
 typedef struct {
     int  year;        // e.g. 2026
     int  month;       // 1..12
@@ -68,3 +64,9 @@ typedef struct {
 
 // Reads the current local date/time and the device timezone.
 bool settings_get_datetime(DateTime *out);
+
+// Sets the clock from the given wall-clock fields (interpreted in the device's
+// current timezone) by writing the network system clock — the path a sysmodule
+// is permitted to use; the displayed time follows it. The timezone field is not
+// applied (timezone writes are rejected). Returns false if the write failed.
+bool settings_set_datetime(const DateTime *dt);
