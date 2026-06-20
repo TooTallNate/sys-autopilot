@@ -5,6 +5,7 @@
 #include "common/config.h"
 #include "common/device_info.h"
 #include "common/input.h"
+#include "common/install.h"
 #include "common/log.h"
 #include "common/netif.h"
 #include "common/oauth.h"
@@ -12,9 +13,10 @@
 #include "common/server.h"
 #include "common/settings.h"
 
-// Inner heap: socket transfer memory + stdio buffers + dir listing JSON.
-// The large fixed buffers (JPEG, I/O, HDLS workmem) are static bss.
-#define INNER_HEAP_SIZE 0x100000
+// Inner heap: socket transfer memory + stdio buffers + dir listing JSON +
+// headroom for the title installer (ncm IPC, mounting the cnmt NCA). The large
+// fixed buffers (JPEG, I/O, HDLS workmem, install chunk) are static bss.
+#define INNER_HEAP_SIZE 0x400000
 
 #ifdef __cplusplus
 extern "C" {
@@ -124,11 +126,17 @@ void __appInit(void)
     // while sm is up; best-effort (a missing service just disables its tool).
     settings_init();
 
+    // Title installation services (ncm/ns/es). Opened while sm is up; if these
+    // fail the /install endpoint reports unavailability.
+    if (!install_init())
+        LOGF("install: services unavailable; /install disabled\n");
+
     smExit();
 }
 
 void __appExit(void)
 {
+    install_exit();
     settings_exit();
     netif_exit();
     power_spsm_exit();
