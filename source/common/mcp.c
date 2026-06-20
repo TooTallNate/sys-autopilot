@@ -655,7 +655,11 @@ static void tool_set_theme(HttpRequest *req, const char *id,
     if (!settings_set_theme(dark))
         send_tool_error(req->fd, id, "failed to set theme");
     else
-        send_tool_ok(req->fd, id, dark ? "theme set to dark" : "theme set to light");
+        send_tool_ok(req->fd, id,
+                     dark ? "theme set to dark (applies after the HOME menu reloads — "
+                            "sleep/wake or reboot)"
+                          : "theme set to light (applies after the HOME menu reloads — "
+                            "sleep/wake or reboot)");
 }
 
 static void tool_get_nickname(HttpRequest *req, const char *id) {
@@ -726,6 +730,43 @@ static void tool_airplane_mode(HttpRequest *req, const char *id) {
     send_tool_ok(req->fd, id,
                  "wireless disabled. NOTE: the server is now unreachable until "
                  "wireless is re-enabled physically on the console.");
+}
+
+static void tool_get_auto_time(HttpRequest *req, const char *id) {
+    bool en = false;
+    if (!settings_get_auto_time(&en))
+        send_tool_error(req->fd, id, "failed to read auto-time");
+    else
+        send_tool_ok(req->fd, id, en ? "enabled" : "disabled");
+}
+
+static void tool_set_auto_time(HttpRequest *req, const char *id,
+                               const JsonDoc *doc, int args) {
+    int t = json_obj_get(doc, args, "enabled");
+    bool en;
+    if (t < 0 || !json_get_bool(doc, t, &en)) {
+        send_tool_error(req->fd, id, "missing boolean 'enabled'");
+        return;
+    }
+    if (!settings_set_auto_time(en))
+        send_tool_error(req->fd, id, "failed to set auto-time");
+    else
+        send_tool_ok(req->fd, id, en ? "internet time sync enabled"
+                                     : "internet time sync disabled");
+}
+
+static void tool_get_datetime(HttpRequest *req, const char *id) {
+    DateTime dt = {0};
+    if (!settings_get_datetime(&dt)) {
+        send_tool_error(req->fd, id, "failed to read date/time");
+        return;
+    }
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+             "%04d-%02d-%02d %02d:%02d:%02d %s",
+             dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+             dt.timezone);
+    send_tool_ok(req->fd, id, msg);
 }
 
 static void tool_power(HttpRequest *req, const char *id, PowerAction action,
@@ -813,6 +854,9 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "set_volume") == 0)
         tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
     else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
+    else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);
+    else if (strcmp(name, "set_auto_time") == 0)    tool_set_auto_time(req, id, doc, args);
+    else if (strcmp(name, "get_datetime") == 0)     tool_get_datetime(req, id);
     else send_rpc_error(req->fd, id, -32602, "unknown tool");
 }
 

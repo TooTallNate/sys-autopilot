@@ -285,6 +285,47 @@ static void handle_settings_airplane(HttpRequest *req) {
                    "unreachable until wireless is re-enabled on the console\"}");
 }
 
+static void handle_settings_auto_time(HttpRequest *req) {
+    if (strcmp(req->method, "GET") == 0) {
+        bool en = false;
+        if (!settings_get_auto_time(&en)) {
+            http_send_error(req->fd, 500, "failed to read auto-time");
+            return;
+        }
+        http_send_json(req->fd, 200, "{\"autoTime\":%s}", en ? "true" : "false");
+        return;
+    }
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+    int t = json_obj_get(&doc, root, "autoTime");
+    bool en;
+    if (t < 0 || !json_get_bool(&doc, t, &en)) {
+        http_send_error(req->fd, 400, "missing boolean 'autoTime'");
+        return;
+    }
+    if (!settings_set_auto_time(en))
+        http_send_error(req->fd, 500, "failed to set auto-time");
+    else
+        http_send_json(req->fd, 200, "{\"ok\":true,\"autoTime\":%s}", en ? "true" : "false");
+}
+
+static void handle_settings_datetime(HttpRequest *req) {
+    // Read-only: a sysmodule cannot move the displayed clock (see settings.h).
+    DateTime dt = {0};
+    if (!settings_get_datetime(&dt)) {
+        http_send_error(req->fd, 500, "failed to read date/time");
+        return;
+    }
+    http_send_json(req->fd, 200,
+                   "{\"year\":%d,\"month\":%d,\"day\":%d,"
+                   "\"hour\":%d,\"minute\":%d,\"second\":%d,"
+                   "\"timezone\":\"%s\"}",
+                   dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+                   dt.timezone);
+}
+
 // --- /power/* ------------------------------------------------------------------
 
 static void handle_power(HttpRequest *req, PowerAction action, const char *note) {
@@ -350,6 +391,9 @@ static const Route kRoutes[] = {
     { "GET",    "/settings/volume",       handle_settings_volume },
     { "POST",   "/settings/volume",       handle_settings_volume },
     { "POST",   "/settings/airplane",     handle_settings_airplane },
+    { "GET",    "/settings/auto-time",    handle_settings_auto_time },
+    { "POST",   "/settings/auto-time",    handle_settings_auto_time },
+    { "GET",    "/settings/datetime",     handle_settings_datetime },
     { "POST",   "/oauth/register",    oauth_handle_register },
     { "GET",    "/oauth/authorize",   oauth_handle_authorize_get },
     { "POST",   "/oauth/authorize",   oauth_handle_authorize_post },

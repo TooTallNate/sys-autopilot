@@ -198,7 +198,7 @@ Details:
 | `upload_file` | Write a file (base64 `content`, **streamed to SD — no size cap**) |
 | `delete_file` | Delete a file / empty directory |
 | `hash_file` | SHA-256 a file (streamed, any size); optional `expected` returns `matched` — verify an upload in one call |
-| `get_theme` / `set_theme` | Read / set the system UI theme (`light` or `dark`) |
+| `get_theme` / `set_theme` | Read / set the system UI theme (`light` or `dark`; the visible change applies after the HOME menu reloads — sleep/wake or reboot) |
 | `get_nickname` / `set_nickname` | Read / set the console's device nickname |
 | `get_brightness` / `set_brightness` | Read / set screen brightness (`0.0`–`1.0`) |
 | `get_volume` / `set_volume` | Read / set master volume (`0.0`–`1.0`) |
@@ -304,7 +304,17 @@ POST /settings/brightness  {"brightness":0.8}
 GET  /settings/volume                      -> {"volume":0.5}       (0.0-1.0)
 POST /settings/volume      {"volume":0.3}
 POST /settings/airplane    (empty body)    disable wireless (one-way)
+GET  /settings/auto-time                   -> {"autoTime":true}
+POST /settings/auto-time   {"autoTime":false}
+GET  /settings/datetime                    -> {"year":2026,...,"timezone":"America/New_York"}
+POST /settings/datetime    {"year":2026,"month":6,"day":19,"hour":14,"minute":30,"timezone":"America/New_York"}
 ```
+
+`POST /settings/datetime` accepts any subset of fields (omitted ones keep their
+current value), interprets the time in the given/current timezone, and disables
+internet time sync so the manual value sticks. `theme` updates the stored
+setting immediately but the HOME menu only shows it after it reloads
+(sleep/wake or reboot).
 
 ```sh
 curl -X POST "http://<ip>:4150/settings/theme" \

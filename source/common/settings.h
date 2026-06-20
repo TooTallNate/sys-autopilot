@@ -45,3 +45,26 @@ bool settings_disable_wireless(void);
 // --- battery (read-only) ------------------------------------------------------
 // Reports charge percentage (0..100) and whether a charger is connected.
 bool settings_get_battery(uint32_t *out_percent, bool *out_charging);
+
+// --- automatic clock sync (internet time) ------------------------------------
+bool settings_get_auto_time(bool *out_enabled);
+bool settings_set_auto_time(bool enabled);
+
+// --- date / time / timezone (read-only) ---------------------------------------
+// A wall-clock value in the device's timezone. Read-only: a background
+// sysmodule cannot move the displayed clock (the user clock rejects writes with
+// rc 0x274, and writing the network clock does not propagate to the displayed
+// time). Apps that can set the clock, e.g. QuickNTP, run as overlays in a
+// different permission context.
+typedef struct {
+    int  year;        // e.g. 2026
+    int  month;       // 1..12
+    int  day;         // 1..31
+    int  hour;        // 0..23
+    int  minute;      // 0..59
+    int  second;      // 0..59
+    char timezone[36]; // IANA location name, e.g. "America/New_York"
+} DateTime;
+
+// Reads the current local date/time and the device timezone.
+bool settings_get_datetime(DateTime *out);

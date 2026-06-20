@@ -199,7 +199,10 @@ tools = [
     },
     {
         "name": "set_theme",
-        "description": "Set the system UI theme (light or dark mode).",
+        "description": ("Set the system UI theme (light or dark mode). NOTE: this updates the "
+                        "stored setting immediately, but the HOME menu only re-reads it when it "
+                        "reloads - so the visible change takes effect after sleep/wake or a "
+                        "reboot, not instantly."),
         "inputSchema": {"type": "object", "properties": {
             "theme": {"type": "string", "enum": ["light", "dark"]},
         }, "required": ["theme"]},
@@ -248,6 +251,28 @@ tools = [
                         "immediately and CANNOT be re-enabled remotely - a human must turn "
                         "wireless back on from the console. There is no remote 'disable airplane "
                         "mode' for that reason. Only use when explicitly asked to."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_auto_time",
+        "description": ("Get whether the clock is automatically synchronized over the internet. "
+                        "Returns \"enabled\" or \"disabled\"."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_auto_time",
+        "description": ("Enable or disable automatic internet clock synchronization. Disable it "
+                        "before setting the clock manually with set_datetime, or the manual time "
+                        "is overwritten."),
+        "inputSchema": {"type": "object", "properties": {
+            "enabled": {"type": "boolean"},
+        }, "required": ["enabled"]},
+    },
+    {
+        "name": "get_datetime",
+        "description": ("Get the console's current local date, time, and timezone. Returns "
+                        "\"YYYY-MM-DD HH:MM:SS <timezone>\". Read-only: a background sysmodule "
+                        "cannot change the displayed clock."),
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]

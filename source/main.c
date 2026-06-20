@@ -23,8 +23,8 @@ extern "C" {
 u32 __nx_applet_type = AppletType_None;
 u32 __nx_fs_num_sessions = 1;
 
-// Sysmodules must use time:s (the npdm grants it); used for the
-// "# issued <date>" stamps in the OAuth tokens file.
+// Sysmodules use time:s (the npdm grants it); used for the OAuth
+// "# issued <date>" stamps and the read-only get_datetime tool.
 u32 __nx_time_service_type = TimeServiceType_System;
 
 // Internal libnx helper that wires newlib's time() to the time service.
