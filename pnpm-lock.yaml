@@ -7,6 +7,16 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@tootallnate/ncz':
+        specifier: ^0.1.0
+        version: 0.1.0
+      '@tootallnate/pfs0':
+        specifier: ^0.0.3
+        version: 0.0.3
+      '@tootallnate/zstd-wasm':
+        specifier: ^0.1.0
+        version: 0.1.0
     devDependencies:
       '@changesets/changelog-github':
         specifier: ^0.5.1
@@ -108,6 +118,18 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@nx.js/util@1.1.0':
+    resolution: {integrity: sha512-UUWJCFpFSKHhp3HYrKk+BVmUpS2JxD55Dqhw6TJTmOaTI3HKOqQJJlIOwK/GRRW3VTXAOO13x+k4BHxFy7jnPg==}
+
+  '@tootallnate/ncz@0.1.0':
+    resolution: {integrity: sha512-TDljZIlOQ3+vr12EBlJ6HN/7n/37QGssA4EjV6WZRtnL6WR+bXCuUxzJRetwqWjTPwS2kEXG7aSz1Fj2et/pOg==}
+
+  '@tootallnate/pfs0@0.0.3':
+    resolution: {integrity: sha512-Uojp3Mxe6YL0iwNyZk7DAfngpQwTO8Fk1WwMXJ4AKUpRWJfxfDwS2wj0S6HU7L/5sQ9lvVaPRS3eFzhx1pp02g==}
+
+  '@tootallnate/zstd-wasm@0.1.0':
+    resolution: {integrity: sha512-cIJiBKLTWjIONc2KDlQg9YjBxg99eXLmseWZumZibDb+TAZxWH4btuu4mK4XpNlCAXlkuZsQjebYfIypriDgLw==}
 
   '@types/node@12.20.55':
     resolution: {integrity: sha512-J8xLz7q2OFulZ2cyGTLE1TbbZcjpno7FaN6zdJNrgAdrJ+DZzh/uFR6YrTb4C+nXakvud8Q4+rbhoIWlYQbUFQ==}
@@ -613,6 +635,16 @@ snapshots:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
+
+  '@nx.js/util@1.1.0': {}
+
+  '@tootallnate/ncz@0.1.0': {}
+
+  '@tootallnate/pfs0@0.0.3':
+    dependencies:
+      '@nx.js/util': 1.1.0
+
+  '@tootallnate/zstd-wasm@0.1.0': {}
 
   '@types/node@12.20.55': {}
 

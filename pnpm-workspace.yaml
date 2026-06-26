@@ -1,0 +1,6 @@
+# These are first-party @tootallnate packages; exempt them from the
+# minimumReleaseAge supply-chain delay so freshly-published versions install.
+minimumReleaseAgeExclude:
+  - '@tootallnate/ncz'
+  - '@tootallnate/pfs0'
+  - '@tootallnate/zstd-wasm'
