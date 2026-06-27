@@ -3,6 +3,7 @@
 #include "files.h"
 #include "input.h"
 #include "install.h"
+#include "titles.h"
 #include "json.h"
 #include "mcp.h"
 #include "oauth.h"
@@ -366,6 +367,43 @@ static void handle_settings_datetime(HttpRequest *req) {
                        dt.timezone);
 }
 
+// --- /titles -----------------------------------------------------------------
+
+// Maps an NcmStorageId to the short label used in the JSON response.
+static const char *storage_label(uint8_t storage_id) {
+    switch (storage_id) {
+        case 5: return "sd";
+        case 4: return "nand";
+        case 2: return "gamecard";
+        default: return "other";
+    }
+}
+
+static void handle_titles(HttpRequest *req) {
+    static TitleInfo titles[TITLES_MAX];
+    int count = 0;
+    char err[128] = {0};
+    if (!titles_list(titles, TITLES_MAX, &count, err, sizeof(err))) {
+        http_send_error(req->fd, 500, err[0] ? err : "failed to list titles");
+        return;
+    }
+
+    // Build the JSON into a static buffer (the list can be large). Each entry is
+    // well under 256 bytes; TITLES_MAX entries fit comfortably.
+    static char body[TITLES_MAX * 256 + 32];
+    size_t pos = (size_t)snprintf(body, sizeof(body), "{\"titles\":[");
+    for (int i = 0; i < count && pos < sizeof(body) - 256; i++) {
+        char name[160];
+        json_escape(titles[i].name, strlen(titles[i].name), name, sizeof(name));
+        pos += (size_t)snprintf(body + pos, sizeof(body) - pos,
+            "%s{\"titleId\":\"%016llx\",\"version\":%u,\"storage\":\"%s\",\"name\":\"%s\"}",
+            i ? "," : "", (unsigned long long)titles[i].title_id,
+            titles[i].version, storage_label(titles[i].storage_id), name);
+    }
+    pos += (size_t)snprintf(body + pos, sizeof(body) - pos, "]}");
+    http_send_response(req->fd, 200, "application/json", body, pos);
+}
+
 // --- /install ----------------------------------------------------------------
 
 // Adapts the HTTP request body into the installer's sequential read callback.
@@ -453,6 +491,7 @@ static const Route kRoutes[] = {
     { "GET",    "/files/hash",        files_handle_hash },
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
+    { "GET",    "/titles",            handle_titles },
     { "POST",   "/install",           handle_install },
     { "PUT",    "/install",           handle_install },
     { "POST",   "/mcp",               mcp_handle_post },

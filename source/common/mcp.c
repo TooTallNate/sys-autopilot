@@ -11,6 +11,7 @@
 #include "routes.h"
 #include "screen.h"
 #include "settings.h"
+#include "titles.h"
 #include "log.h"
 #include "mcp_tools.h"
 
@@ -732,6 +733,31 @@ static void tool_airplane_mode(HttpRequest *req, const char *id) {
                  "wireless is re-enabled physically on the console.");
 }
 
+static void tool_list_titles(HttpRequest *req, const char *id) {
+    static TitleInfo titles[TITLES_MAX];
+    int count = 0;
+    char err[128] = {0};
+    if (!titles_list(titles, TITLES_MAX, &count, err, sizeof(err))) {
+        send_tool_error(req->fd, id, err[0] ? err : "failed to list titles");
+        return;
+    }
+    static char text[TITLES_MAX * 128 + 64];
+    size_t pos = 0;
+    if (count == 0)
+        pos += (size_t)snprintf(text, sizeof(text), "(no titles installed)");
+    for (int i = 0; i < count && pos < sizeof(text) - 128; i++) {
+        const char *storage =
+            titles[i].storage_id == 5 ? "sd" :
+            titles[i].storage_id == 4 ? "nand" :
+            titles[i].storage_id == 2 ? "gamecard" : "other";
+        pos += (size_t)snprintf(text + pos, sizeof(text) - pos,
+            "%s%016llx  v%-6u  %-8s  %s", i ? "\n" : "",
+            (unsigned long long)titles[i].title_id, titles[i].version, storage,
+            titles[i].name[0] ? titles[i].name : "(name unavailable)");
+    }
+    send_tool_ok(req->fd, id, text);
+}
+
 static void tool_get_auto_time(HttpRequest *req, const char *id) {
     bool en = false;
     if (!settings_get_auto_time(&en))
@@ -892,6 +918,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "set_volume") == 0)
         tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
     else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
+    else if (strcmp(name, "list_installed_titles") == 0) tool_list_titles(req, id);
     else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);
     else if (strcmp(name, "set_auto_time") == 0)    tool_set_auto_time(req, id, doc, args);
     else if (strcmp(name, "get_datetime") == 0)     tool_get_datetime(req, id);
