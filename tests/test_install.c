@@ -100,12 +100,112 @@ static void test_short(void) {
     printf("  short header rejected: ok\n");
 }
 
+// Builds a minimal HFS0 header (0x40-byte entries) into buf, returns its size.
+static size_t build_hfs0(uint8_t *buf, const char **names, const uint64_t *offs,
+                         const uint64_t *sizes, int count) {
+    char strtab[256];
+    uint32_t name_offs[16];
+    size_t st = 0;
+    for (int i = 0; i < count; i++) {
+        name_offs[i] = (uint32_t)st;
+        size_t l = strlen(names[i]);
+        memcpy(strtab + st, names[i], l + 1);
+        st += l + 1;
+    }
+    uint32_t strtab_size = (uint32_t)st;
+
+    w32(buf + 0, 0x30534648);   // HFS0
+    w32(buf + 4, (uint32_t)count);
+    w32(buf + 8, strtab_size);
+    w32(buf + 12, 0);
+    size_t pos = 0x10;
+    for (int i = 0; i < count; i++) {
+        w64(buf + pos, offs[i]);          // data_offset
+        w64(buf + pos + 8, sizes[i]);     // data_size
+        w32(buf + pos + 16, name_offs[i]);// name_offset
+        w32(buf + pos + 20, 0x200);       // hash_size
+        w64(buf + pos + 24, 0);           // reserved
+        memset(buf + pos + 32, 0, 0x20);  // hash
+        pos += 0x40;
+    }
+    memcpy(buf + pos, strtab, strtab_size);
+    pos += strtab_size;
+    return pos;
+}
+
+static void test_hfs0_basic(void) {
+    uint8_t buf[1024];
+    const char *names[] = {
+        "abc0123456789abcdef0123456789abc.nca",
+        "def0123456789abcdef0123456789abc.cnmt.nca",
+    };
+    uint64_t offs[]  = { 0, 0x4000 };
+    uint64_t sizes[] = { 0x4000, 0x800 };
+    size_t hsize = build_hfs0(buf, names, offs, sizes, 2);
+
+    assert(hfs0_header_size(buf) == hsize);
+
+    Hfs0Entry e[8];
+    int count = 0;
+    uint64_t data_start = 0;
+    const char *err = NULL;
+    bool ok = hfs0_parse_header(buf, hsize, e, 8, &count, &data_start, &err);
+    assert(ok);
+    assert(count == 2);
+    assert(data_start == hsize);
+    assert(strcmp(e[0].name, names[0]) == 0 && e[0].offset == 0 && e[0].size == 0x4000);
+    assert(strcmp(e[1].name, names[1]) == 0 && e[1].offset == 0x4000 && e[1].size == 0x800);
+    printf("  hfs0 basic parse: ok\n");
+}
+
+static void test_hfs0_bad_magic(void) {
+    uint8_t buf[64] = {0};
+    memcpy(buf, "PFS0", 4); // wrong magic for HFS0
+    assert(hfs0_header_size(buf) == 0);
+    Hfs0Entry e[4]; int c; uint64_t ds; const char *err = NULL;
+    assert(!hfs0_parse_header(buf, sizeof(buf), e, 4, &c, &ds, &err));
+    printf("  hfs0 bad magic rejected: ok\n");
+}
+
+static void test_container_detect(void) {
+    uint64_t root = 0;
+
+    // NSP: PFS0 magic at 0.
+    uint8_t nsp[0x1104] = {0};
+    memcpy(nsp, "PFS0", 4);
+    assert(container_detect(nsp, sizeof(nsp), &root) == CONTAINER_NSP);
+
+    // Trimmed XCI: "HEAD" at 0x100 -> root HFS0 at 0xF000.
+    uint8_t xci[0x1104] = {0};
+    memcpy(xci + 0x100, "HEAD", 4);
+    root = 0;
+    assert(container_detect(xci, sizeof(xci), &root) == CONTAINER_XCI);
+    assert(root == 0xF000);
+
+    // Full XCI: "HEAD" at 0x1100 -> root HFS0 at 0x10000.
+    uint8_t xcifull[0x1104] = {0};
+    memcpy(xcifull + 0x1100, "HEAD", 4);
+    root = 0;
+    assert(container_detect(xcifull, sizeof(xcifull), &root) == CONTAINER_XCI);
+    assert(root == 0x10000);
+
+    // Unknown.
+    uint8_t junk[0x1104] = {0};
+    memcpy(junk, "JUNK", 4);
+    assert(container_detect(junk, sizeof(junk), &root) == CONTAINER_UNKNOWN);
+
+    printf("  container detect (nsp/xci-trimmed/xci-full/unknown): ok\n");
+}
+
 int main(void) {
     printf("== test_install ==\n");
     test_basic();
     test_bad_magic();
     test_too_many();
     test_short();
+    test_hfs0_basic();
+    test_hfs0_bad_magic();
+    test_container_detect();
     printf("test_install: all passed\n");
     return 0;
 }

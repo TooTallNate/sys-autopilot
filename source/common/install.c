@@ -79,6 +79,92 @@ bool pfs0_parse_header(const uint8_t *buf, size_t buf_len,
     return true;
 }
 
+// --- HFS0 header parsing (pure) ----------------------------------------------
+
+// On-disk HFS0 layout: Header(0x10) | FileEntry[count](0x40 each) |
+// string table(string_table_size) | file data.
+typedef struct {
+    uint64_t data_offset;
+    uint64_t data_size;
+    uint32_t name_offset;
+    uint32_t hash_size;
+    uint64_t reserved;
+    uint8_t  hash[0x20];
+} Hfs0FileEntry;
+
+size_t hfs0_header_size(const uint8_t *buf16) {
+    if (rd_u32(buf16) != HFS0_MAGIC)
+        return 0;
+    uint32_t count = rd_u32(buf16 + 4);
+    uint32_t strtab = rd_u32(buf16 + 8);
+    if (count > 4096 || strtab > 0x10000)
+        return 0;
+    return 0x10 + (size_t)count * sizeof(Hfs0FileEntry) + strtab;
+}
+
+bool hfs0_parse_header(const uint8_t *buf, size_t buf_len,
+                       Hfs0Entry *entries, int max_entries, int *out_count,
+                       uint64_t *out_data_start, const char **err) {
+    if (buf_len < 0x10) { *err = "short HFS0 header"; return false; }
+    if (rd_u32(buf) != HFS0_MAGIC) { *err = "bad HFS0 magic"; return false; }
+
+    uint32_t count = rd_u32(buf + 4);
+    uint32_t strtab_size = rd_u32(buf + 8);
+    if (count > 4096 || strtab_size > 0x10000) { *err = "HFS0 too large"; return false; }
+    if ((int)count > max_entries) { *err = "too many files in HFS0"; return false; }
+
+    size_t table_off = 0x10;
+    size_t strtab_off = table_off + (size_t)count * sizeof(Hfs0FileEntry);
+    size_t data_start = strtab_off + strtab_size;
+    if (buf_len < data_start) { *err = "incomplete HFS0 header"; return false; }
+
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *e = buf + table_off + (size_t)i * sizeof(Hfs0FileEntry);
+        uint64_t doff = rd_u64(e);
+        uint64_t dsize = rd_u64(e + 8);
+        uint32_t noff = rd_u32(e + 16);
+        if (noff >= strtab_size) { *err = "bad name offset"; return false; }
+        const char *name = (const char *)(buf + strtab_off + noff);
+        size_t maxlen = strtab_size - noff;
+        size_t nlen = strnlen(name, maxlen);
+        if (nlen >= maxlen) { *err = "unterminated filename"; return false; }
+        if (nlen >= sizeof(entries[i].name)) { *err = "filename too long"; return false; }
+        memcpy(entries[i].name, name, nlen + 1);
+        entries[i].offset = doff;
+        entries[i].size = dsize;
+    }
+
+    *out_count = (int)count;
+    *out_data_start = data_start;
+    return true;
+}
+
+// --- container detection (pure) ----------------------------------------------
+
+ContainerKind container_detect(const uint8_t *buf, size_t len,
+                               uint64_t *out_xci_root) {
+    if (out_xci_root) *out_xci_root = 0;
+    if (len >= 4 && rd_u32(buf) == PFS0_MAGIC)
+        return CONTAINER_NSP;
+    // XCI CardHeader magic "HEAD" is stored as the ASCII bytes H,E,A,D, i.e.
+    // big-endian 0x48454144. Trimmed images have it at 0x100 (root HFS0 at
+    // 0xF000); full images include the 0x1000 CardKeyArea (magic at 0x1100,
+    // root HFS0 at 0x10000).
+    if (len >= 0x104 &&
+        (((uint32_t)buf[0x100] << 24) | ((uint32_t)buf[0x101] << 16) |
+         ((uint32_t)buf[0x102] << 8) | buf[0x103]) == XCI_HEAD_MAGIC) {
+        if (out_xci_root) *out_xci_root = 0xF000;
+        return CONTAINER_XCI;
+    }
+    if (len >= 0x1104 &&
+        (((uint32_t)buf[0x1100] << 24) | ((uint32_t)buf[0x1101] << 16) |
+         ((uint32_t)buf[0x1102] << 8) | buf[0x1103]) == XCI_HEAD_MAGIC) {
+        if (out_xci_root) *out_xci_root = 0x10000;
+        return CONTAINER_XCI;
+    }
+    return CONTAINER_UNKNOWN;
+}
+
 #ifdef __SWITCH__
 #include <switch.h>
 #include <stdarg.h>
@@ -91,7 +177,15 @@ bool pfs0_parse_header(const uint8_t *buf, size_t buf_len,
 // --- helpers -----------------------------------------------------------------
 
 #define INSTALL_CHUNK 0x100000            // 1 MiB streaming chunk
-#define MAX_PFS0_FILES 64                 // NSPs have a handful of entries
+#define MAX_FILES 64                      // NSP/XCI have a handful of entries
+
+// A unified content entry, with the file's ABSOLUTE byte offset within the
+// stream (so the same install loop works for PFS0 and nested-HFS0 layouts).
+typedef struct {
+    char     name[256];
+    uint64_t abs_offset; // absolute offset of this file's data in the stream
+    uint64_t size;
+} InstallEntry;
 
 // The on-disk packaged content-meta header (start of the .cnmt file).
 typedef struct {
@@ -204,7 +298,8 @@ static Result write_content(NcmContentStorage *cs, const NcmContentId *cid,
         u8 digest[32];
         sha256_stream_final(&sha, digest);
         if (memcmp(digest, cid->c, 16) != 0) {
-            LOGF("install: hash mismatch for content\n");
+            LOGF("install: hash mismatch for content (size=%llu)\n",
+                 (unsigned long long)size);
             rc = MAKERESULT(Module_Libnx, LibnxError_BadInput);
             goto done;
         }
@@ -313,46 +408,17 @@ out:
     return ok;
 }
 
-bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
-                        InstallStorage storage, InstallResult *out) {
-    memset(out, 0, sizeof(*out));
-    out->http_status = 200;
-
-    if (!g_ncm_ok || !g_ns_ok) {
-        fail(out, 500, "install services unavailable");
-        return false;
-    }
-
-    NcmStorageId sid = (storage == INSTALL_STORAGE_NAND)
-                     ? NcmStorageId_BuiltInUser : NcmStorageId_SdCard;
-
-    // 1. Read the fixed 16-byte PFS0 header, then the full header region.
-    static u8 hdrbuf[0x10 + MAX_PFS0_FILES * 0x18 + 0x4000];
-    uint64_t consumed = 0;
-    long n = read_fn(ctx, hdrbuf, 0x10);
-    if (n != 0x10) { fail(out, 400, "stream too short"); return false; }
-    consumed += 0x10;
-    size_t hsize = pfs0_header_size(hdrbuf);
-    if (hsize == 0 || hsize > sizeof(hdrbuf)) { fail(out, 400, "not a valid NSP (PFS0)"); return false; }
-    // Read the rest of the header.
-    size_t hgot = 0x10;
-    while (hgot < hsize) {
-        n = read_fn(ctx, hdrbuf + hgot, hsize - hgot);
-        if (n <= 0) { fail(out, 400, "truncated PFS0 header"); return false; }
-        hgot += (size_t)n;
-    }
-    consumed += hsize - 0x10;
-
-    static Pfs0Entry entries[MAX_PFS0_FILES];
-    int file_count = 0;
-    uint64_t data_start = 0;
-    const char *perr = NULL;
-    if (!pfs0_parse_header(hdrbuf, hsize, entries, MAX_PFS0_FILES,
-                           &file_count, &data_start, &perr)) {
-        fail(out, 400, "PFS0 parse: %s", perr);
-        return false;
-    }
-
+// Core installer: given content entries with ABSOLUTE stream offsets and the
+// number of bytes already consumed from the stream, streams each entry into NCM
+// (forward-only, skipping gaps), parses the CNMT, and registers the title.
+// Shared by the NSP and XCI front-ends.
+// `verify`: check each NCA's SHA-256 against its content id (filename) as it is
+// written. Accurate for NSP, but gamecard (XCI) NCAs are not guaranteed to hash
+// to their filename id, so the XCI path passes false.
+static bool install_entries(InstallReadFn read_fn, void *ctx, uint64_t consumed,
+                            InstallEntry *entries, int file_count,
+                            NcmStorageId sid, bool verify, InstallResult *out) {
+    long n;
     NcmContentStorage cs;
     if (R_FAILED(ncmOpenContentStorage(&cs, sid))) {
         fail(out, 500, "cannot open content storage");
@@ -367,14 +433,14 @@ bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
     static u8 tik_buf[0x600]; size_t tik_size = 0;
     static u8 cert_buf[0x800]; size_t cert_size = 0;
 
-    static WrittenContent written[MAX_PFS0_FILES];
+    static WrittenContent written[MAX_FILES];
     int written_n = 0;
     bool failed = false;
 
-    // 2. Stream each entry in file order. data_start is relative to PFS0 start;
-    //    `consumed` tracks how many bytes of the stream we've read.
+    // Stream each entry in offset order. `consumed` tracks how many bytes of
+    // the stream we've read. Entries MUST be sorted by abs_offset ascending.
     for (int i = 0; i < file_count && !failed; i++) {
-        uint64_t file_abs = data_start + entries[i].offset;
+        uint64_t file_abs = entries[i].abs_offset;
         // Skip any gap before this file (forward-only).
         while (consumed < file_abs) {
             uint64_t gap = file_abs - consumed;
@@ -437,7 +503,7 @@ bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
                 fail(out, 400, "bad NCA filename: %s", name); failed = true; break;
             }
             Result rc = write_content(&cs, &cid, entries[i].size, read_fn, ctx,
-                                      NULL, 0, true);
+                                      NULL, 0, verify);
             if (R_FAILED(rc)) { fail(out, 500, "write nca failed (0x%x)", rc); failed = true; break; }
             consumed += entries[i].size;
             written[written_n].id = cid; written[written_n].registered = true; written_n++;
@@ -456,7 +522,7 @@ bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
     // 3. Parse the CNMT (from the now-registered meta NCA via its NCM path),
     //    then register the content-meta DB entry + ticket + record.
     PackagedContentMetaHeader pkg = {0};
-    NcmContentInfo infos[MAX_PFS0_FILES];
+    NcmContentInfo infos[MAX_FILES];
     int infos_n = 0;
     static u8 ext_hdr[0x80];
     u16 ext_hdr_size = 0;
@@ -466,7 +532,7 @@ bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
     }
     if (!failed) {
         const char *cerr = NULL;
-        if (!read_cnmt(&cs, &meta_cid, &pkg, infos, MAX_PFS0_FILES,
+        if (!read_cnmt(&cs, &meta_cid, &pkg, infos, MAX_FILES,
                        &infos_n, ext_hdr, sizeof(ext_hdr), &ext_hdr_size, &cerr)) {
             fail(out, 400, "cnmt: %s", cerr); failed = true;
         }
@@ -486,7 +552,7 @@ bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
         // Build the install-time content-meta blob:
         //   NcmContentMetaHeader | extended header | NcmContentInfo[meta + contents]
         static u8 meta_blob[sizeof(NcmContentMetaHeader) + sizeof(ext_hdr)
-                            + (MAX_PFS0_FILES + 1) * sizeof(NcmContentInfo)];
+                            + (MAX_FILES + 1) * sizeof(NcmContentInfo)];
         size_t pos = 0;
 
         NcmContentMetaHeader mh = {0};
@@ -565,6 +631,207 @@ bool install_nsp_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
              "installed %016llx v%u", (unsigned long long)pkg.id, pkg.version);
     LOGF("install: %s\n", out->message);
     return true;
+}
+
+// Reads exactly `len` bytes into buf (handling short reads), seeding from a
+// pre-read prefix. *consumed is advanced. Returns true on full read.
+static bool read_exact(InstallReadFn read_fn, void *ctx, u8 *buf, size_t len,
+                       u8 *prefix, size_t *prefix_len, uint64_t *consumed) {
+    size_t got = 0;
+    // Consume any leftover pre-read prefix bytes first.
+    if (prefix && *prefix_len > 0) {
+        size_t take = *prefix_len < len ? *prefix_len : len;
+        memcpy(buf, prefix, take);
+        got += take;
+        // Shift the remaining prefix down.
+        *prefix_len -= take;
+        if (*prefix_len > 0) memmove(prefix, prefix + take, *prefix_len);
+        *consumed += take;
+    }
+    while (got < len) {
+        long n = read_fn(ctx, buf + got, len - got);
+        if (n <= 0) return false;
+        got += (size_t)n;
+        *consumed += (uint64_t)n;
+    }
+    return true;
+}
+
+// Skip forward to absolute offset `target` in the stream, draining the pre-read
+// prefix first. *consumed is advanced.
+static bool skip_to(InstallReadFn read_fn, void *ctx, uint64_t target,
+                    u8 *prefix, size_t *prefix_len, uint64_t *consumed) {
+    while (*prefix_len > 0 && *consumed < target) {
+        size_t take = *prefix_len;
+        uint64_t need = target - *consumed;
+        if (take > need) take = (size_t)need;
+        *prefix_len -= take;
+        if (*prefix_len > 0) memmove(prefix, prefix + take, *prefix_len);
+        *consumed += take;
+    }
+    while (*consumed < target) {
+        uint64_t gap = target - *consumed;
+        size_t want = gap > INSTALL_CHUNK ? INSTALL_CHUNK : (size_t)gap;
+        long n = read_fn(ctx, g_chunk, want);
+        if (n <= 0) return false;
+        *consumed += (uint64_t)n;
+    }
+    return true;
+}
+
+// NSP front-end: parse the PFS0 header (seeded with the already-read prefix),
+// build absolute-offset entries, and install.
+static bool install_nsp(InstallReadFn read_fn, void *ctx, NcmStorageId sid,
+                        u8 *prefix, size_t prefix_len, uint64_t consumed,
+                        InstallResult *out) {
+    static u8 hdrbuf[0x10 + MAX_FILES * 0x18 + 0x4000];
+    if (!read_exact(read_fn, ctx, hdrbuf, 0x10, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "stream too short"); return false;
+    }
+    size_t hsize = pfs0_header_size(hdrbuf);
+    if (hsize == 0 || hsize > sizeof(hdrbuf)) { fail(out, 400, "not a valid NSP (PFS0)"); return false; }
+    if (!read_exact(read_fn, ctx, hdrbuf + 0x10, hsize - 0x10, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "truncated PFS0 header"); return false;
+    }
+
+    static Pfs0Entry pe[MAX_FILES];
+    int file_count = 0;
+    uint64_t data_start = 0;
+    const char *perr = NULL;
+    if (!pfs0_parse_header(hdrbuf, hsize, pe, MAX_FILES, &file_count, &data_start, &perr)) {
+        fail(out, 400, "PFS0 parse: %s", perr); return false;
+    }
+
+    static InstallEntry entries[MAX_FILES];
+    for (int i = 0; i < file_count; i++) {
+        memcpy(entries[i].name, pe[i].name, sizeof(entries[i].name));
+        entries[i].abs_offset = data_start + pe[i].offset;
+        entries[i].size = pe[i].size;
+    }
+    return install_entries(read_fn, ctx, consumed, entries, file_count, sid, true, out);
+}
+
+// XCI front-end: skip to the root HFS0, locate the "secure" partition, parse it,
+// and install its NCAs (absolute offsets within the stream).
+static bool install_xci(InstallReadFn read_fn, void *ctx, NcmStorageId sid,
+                        uint64_t root_off, u8 *prefix, size_t prefix_len,
+                        uint64_t consumed, InstallResult *out) {
+    static u8 hdrbuf[0x10 + MAX_FILES * 0x40 + 0x4000];
+
+    // 1. Skip to the root HFS0, read its fixed header, then the full table.
+    if (!skip_to(read_fn, ctx, root_off, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "stream ended before root HFS0"); return false;
+    }
+    if (!read_exact(read_fn, ctx, hdrbuf, 0x10, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "truncated XCI root header"); return false;
+    }
+    size_t rsize = hfs0_header_size(hdrbuf);
+    if (rsize == 0 || rsize > sizeof(hdrbuf)) { fail(out, 400, "not a valid XCI (root HFS0)"); return false; }
+    if (!read_exact(read_fn, ctx, hdrbuf + 0x10, rsize - 0x10, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "truncated XCI root table"); return false;
+    }
+
+    static Hfs0Entry rparts[MAX_FILES];
+    int rcount = 0;
+    uint64_t rdata = 0;
+    const char *herr = NULL;
+    if (!hfs0_parse_header(hdrbuf, rsize, rparts, MAX_FILES, &rcount, &rdata, &herr)) {
+        fail(out, 400, "XCI root: %s", herr); return false;
+    }
+
+    // 2. Find the "secure" partition; its HFS0 begins at root_off + rdata +
+    //    partition.offset (absolute in the stream).
+    uint64_t secure_abs = 0, secure_size = 0;
+    bool have_secure = false;
+    for (int i = 0; i < rcount; i++) {
+        if (strcasecmp(rparts[i].name, "secure") == 0) {
+            secure_abs = root_off + rdata + rparts[i].offset;
+            secure_size = rparts[i].size;
+            have_secure = true;
+            break;
+        }
+    }
+    if (!have_secure) { fail(out, 400, "XCI has no secure partition"); return false; }
+
+    // 3. Skip to the secure HFS0 and parse it.
+    if (!skip_to(read_fn, ctx, secure_abs, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "stream ended before secure partition"); return false;
+    }
+    if (!read_exact(read_fn, ctx, hdrbuf, 0x10, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "truncated secure header"); return false;
+    }
+    size_t ssize = hfs0_header_size(hdrbuf);
+    if (ssize == 0 || ssize > sizeof(hdrbuf)) { fail(out, 400, "bad secure HFS0"); return false; }
+    if (!read_exact(read_fn, ctx, hdrbuf + 0x10, ssize - 0x10, prefix, &prefix_len, &consumed)) {
+        fail(out, 400, "truncated secure table"); return false;
+    }
+
+    static Hfs0Entry se[MAX_FILES];
+    int file_count = 0;
+    uint64_t sdata = 0;
+    if (!hfs0_parse_header(hdrbuf, ssize, se, MAX_FILES, &file_count, &sdata, &herr)) {
+        fail(out, 400, "secure HFS0: %s", herr); return false;
+    }
+
+    // Absolute data offset of the secure partition's file region.
+    uint64_t secure_data_abs = secure_abs + sdata;
+    (void)secure_size;
+
+    static InstallEntry entries[MAX_FILES];
+    for (int i = 0; i < file_count; i++) {
+        memcpy(entries[i].name, se[i].name, sizeof(entries[i].name));
+        entries[i].abs_offset = secure_data_abs + se[i].offset;
+        entries[i].size = se[i].size;
+    }
+    // HFS0 entries are already in offset order, but sort defensively so the
+    // forward-only install loop never sees a backward jump.
+    for (int i = 1; i < file_count; i++) {
+        InstallEntry key = entries[i];
+        int j = i - 1;
+        while (j >= 0 && entries[j].abs_offset > key.abs_offset) {
+            entries[j + 1] = entries[j]; j--;
+        }
+        entries[j + 1] = key;
+    }
+    return install_entries(read_fn, ctx, consumed, entries, file_count, sid, false, out);
+}
+
+bool install_stream(InstallReadFn read_fn, void *ctx, uint64_t total_size,
+                    InstallStorage storage, InstallResult *out) {
+    (void)total_size;
+    memset(out, 0, sizeof(*out));
+    out->http_status = 200;
+
+    if (!g_ncm_ok || !g_ns_ok) {
+        fail(out, 500, "install services unavailable");
+        return false;
+    }
+
+    NcmStorageId sid = (storage == INSTALL_STORAGE_NAND)
+                     ? NcmStorageId_BuiltInUser : NcmStorageId_SdCard;
+
+    // Peek enough bytes to distinguish NSP (PFS0@0) from XCI (HEAD@0x100 or
+    // @0x1100). We buffer the peeked bytes and hand them to the front-end as a
+    // pre-read prefix since the stream is forward-only.
+    static u8 prefix[0x1104];
+    size_t prefix_len = 0;
+    uint64_t consumed = 0;
+    while (prefix_len < sizeof(prefix)) {
+        long nn = read_fn(ctx, prefix + prefix_len, sizeof(prefix) - prefix_len);
+        if (nn <= 0) break; // small file (e.g. tiny NSP) — detect on what we have
+        prefix_len += (size_t)nn;
+    }
+    consumed = prefix_len;
+
+    uint64_t xci_root = 0;
+    ContainerKind kind = container_detect(prefix, prefix_len, &xci_root);
+    if (kind == CONTAINER_NSP)
+        return install_nsp(read_fn, ctx, sid, prefix, prefix_len, consumed - prefix_len, out);
+    if (kind == CONTAINER_XCI)
+        return install_xci(read_fn, ctx, sid, xci_root, prefix, prefix_len, consumed - prefix_len, out);
+
+    fail(out, 400, "unrecognized container (need NSP/PFS0 or XCI)");
+    return false;
 }
 
 #endif // __SWITCH__

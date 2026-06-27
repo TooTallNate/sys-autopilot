@@ -375,7 +375,7 @@ static long install_body_read(void *ctx, void *buf, size_t len) {
 
 static void handle_install(HttpRequest *req) {
     if (!req->has_content_length) {
-        http_send_error(req->fd, 411, "Content-Length required (stream the NSP with curl -T)");
+        http_send_error(req->fd, 411, "Content-Length required (stream the NSP/XCI with curl -T)");
         return;
     }
 
@@ -387,7 +387,7 @@ static void handle_install(HttpRequest *req) {
         storage = INSTALL_STORAGE_NAND;
 
     InstallResult res;
-    install_nsp_stream(install_body_read, req, req->content_length, storage, &res);
+    install_stream(install_body_read, req, req->content_length, storage, &res);
 
     char esc[256];
     json_escape(res.message, strlen(res.message), esc, sizeof(esc));

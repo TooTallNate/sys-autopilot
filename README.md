@@ -282,12 +282,13 @@ curl "http://<ip>:4150/files?path=/switch/myapp/debug.log&offset=-2048"
 
 ### Install a title
 
-Stream an **NSP** straight to the console and install it (NCM content storage +
-application record) — no SD-card staging, nothing to clean up afterwards. The
-title appears on the HOME menu when done.
+Stream an **NSP** or **XCI** straight to the console and install it (NCM content
+storage + application record) — no SD-card staging, nothing to clean up
+afterwards. The title appears on the HOME menu when done. The container format
+is auto-detected from the stream, so the same endpoint handles both.
 
 ```
-POST|PUT /install[?storage=sd|nand]    install a streamed NSP (default: sd)
+POST|PUT /install[?storage=sd|nand]    install a streamed NSP or XCI (default: sd)
 ```
 
 ```sh
@@ -295,18 +296,24 @@ POST|PUT /install[?storage=sd|nand]    install a streamed NSP (default: sd)
 curl -g -T "Game [0100...000][v0].nsp" "http://<ip>:4150/install"
 # -> {"ok":true,"titleId":"0100...000","version":0,"message":"installed ..."}
 
+# XCI works the same way (the NCAs in its "secure" partition are installed):
+curl -g -T "Game [0100...000][v0].xci" "http://<ip>:4150/install"
+
 # install to internal storage instead of the SD card:
 curl -g -T game.nsp "http://<ip>:4150/install?storage=nand"
 ```
 
-The NSP is streamed (its size comes from `Content-Length`, which `curl -T`
-sends), so multi-GB titles install without buffering to disk. Each NCA's
-SHA-256 is verified against its content id as it is written, and a failed
-install rolls back the content it wrote.
+The file is streamed (its size comes from `Content-Length`, which `curl -T`
+sends), so multi-GB titles install without buffering to disk. For NSP, each
+NCA's SHA-256 is verified against its content id as it is written; a failed
+install rolls back the content it wrote. (XCI gamecard NCAs are not guaranteed
+to hash to their filename id, so that per-NCA check is skipped for XCI; the
+meta NCA is still verified.) Both trimmed and full XCI layouts are supported.
 
-> **NSP only** for now (compressed **NSZ** is not yet supported). Installing
-> commercial titles still requires a valid ticket and, for some games, a linked
-> account — that is the title's own DRM, independent of the installer.
+> Uncompressed containers only — decompress **NSZ** on the host first (see
+> `scripts/install-nsz.mjs`). Installing commercial titles still requires a
+> valid ticket and, for some games, a linked account — that is the title's own
+> DRM, independent of the installer.
 
 ### Status
 
