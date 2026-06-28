@@ -311,9 +311,33 @@ to hash to their filename id, so that per-NCA check is skipped for XCI; the
 meta NCA is still verified.) Both trimmed and full XCI layouts are supported.
 
 > Uncompressed containers only — decompress **NSZ** on the host first (see
-> `scripts/install-nsz.mjs`). Installing commercial titles still requires a
-> valid ticket and, for some games, a linked account — that is the title's own
-> DRM, independent of the installer.
+> Compressed NSZ below). Installing commercial titles still requires a valid
+> ticket and, for some games, a linked account — that is the title's own DRM,
+> independent of the installer.
+
+#### Compressed NSZ
+
+The console only understands plain NSP (uncompressed NCAs); decompressing an
+**NSZ** on-device would force a multi-MB zstd window to live permanently in the
+sysmodule, so the decompression is done on the host instead. The included
+`install-nsz` script reads an `.nsz`, decompresses + re-encrypts each `.ncz`
+into a plain NCA on the fly, and streams a reconstructed NSP straight to
+`/install` (nothing is buffered to disk; the console still verifies every NCA
+hash as it lands):
+
+```sh
+# one-time: install the host dependencies
+pnpm install
+
+node scripts/install-nsz.mjs "Game [0100...000][v0].nsz" http://<ip>:4150 --netrc
+# -> HTTP 200: {"ok":true,"titleId":"0100...000","version":0,"message":"installed ..."}
+
+# options: --storage nand   --user <u> --pass <p>   --dry-run (verify locally, no upload)
+```
+
+`--netrc` reads HTTP Basic credentials from `~/.netrc` for the console's host.
+Use `--dry-run` to decompress and validate the reconstructed NSP size locally
+without touching a console.
 
 ### List installed titles
 
