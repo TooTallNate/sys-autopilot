@@ -262,6 +262,25 @@ tools = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "get_dns",
+        "description": ("Get the console's current DNS configuration for the active network "
+                        "connection: whether it's automatic (DHCP) or manual, and the primary/"
+                        "secondary DNS server addresses."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_dns",
+        "description": ("Set the active connection's DNS servers. Pass 'primary' (and optional "
+                        "'secondary') as IPv4 strings to set manual DNS, or 'automatic':true to "
+                        "revert to DHCP. Useful for pointing the console at a custom/black-hole "
+                        "DNS (e.g. 90DNS) to block Nintendo servers while staying on the LAN."),
+        "inputSchema": {"type": "object", "properties": {
+            "automatic": {"type": "boolean", "description": "true = revert to DHCP DNS (ignores primary/secondary)."},
+            "primary": {"type": "string", "description": "Primary DNS IPv4, e.g. \"207.246.121.77\"."},
+            "secondary": {"type": "string", "description": "Optional secondary DNS IPv4."},
+        }},
+    },
+    {
         "name": "get_auto_time",
         "description": ("Get whether the clock is automatically synchronized over the internet. "
                         "Returns \"enabled\" or \"disabled\"."),

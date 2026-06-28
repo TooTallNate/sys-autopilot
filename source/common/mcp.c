@@ -12,6 +12,7 @@
 #include "screen.h"
 #include "settings.h"
 #include "titles.h"
+#include "network.h"
 #include "log.h"
 #include "mcp_tools.h"
 
@@ -758,6 +759,52 @@ static void tool_list_titles(HttpRequest *req, const char *id) {
     send_tool_ok(req->fd, id, text);
 }
 
+static void tool_get_dns(HttpRequest *req, const char *id) {
+    DnsConfig c;
+    char err[96];
+    if (!network_get_dns(&c, err, sizeof(err))) {
+        send_tool_error(req->fd, id, err);
+        return;
+    }
+    char text[128];
+    if (c.is_automatic)
+        snprintf(text, sizeof(text), "automatic (DHCP): primary=%s secondary=%s",
+                 c.primary, c.secondary);
+    else
+        snprintf(text, sizeof(text), "manual: primary=%s secondary=%s",
+                 c.primary, c.secondary[0] ? c.secondary : "(none)");
+    send_tool_ok(req->fd, id, text);
+}
+
+static void tool_set_dns(HttpRequest *req, const char *id,
+                         const JsonDoc *doc, int args) {
+    bool automatic = false;
+    int t = json_obj_get(doc, args, "automatic");
+    if (t >= 0) json_get_bool(doc, t, &automatic);
+    char primary[64] = {0}, secondary[64] = {0};
+    t = json_obj_get(doc, args, "primary");
+    if (t >= 0) json_get_string(doc, t, primary, sizeof(primary));
+    t = json_obj_get(doc, args, "secondary");
+    if (t >= 0) json_get_string(doc, t, secondary, sizeof(secondary));
+
+    if (!automatic && !primary[0]) {
+        send_tool_error(req->fd, id, "provide 'primary' (IPv4) or set 'automatic':true");
+        return;
+    }
+    char err[96];
+    if (!network_set_dns(automatic, primary, secondary, err, sizeof(err))) {
+        send_tool_error(req->fd, id, err);
+        return;
+    }
+    char text[128];
+    if (automatic)
+        snprintf(text, sizeof(text), "DNS set to automatic (DHCP)");
+    else
+        snprintf(text, sizeof(text), "DNS set to manual: %s%s%s", primary,
+                 secondary[0] ? ", " : "", secondary);
+    send_tool_ok(req->fd, id, text);
+}
+
 static void tool_get_auto_time(HttpRequest *req, const char *id) {
     bool en = false;
     if (!settings_get_auto_time(&en))
@@ -919,6 +966,8 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
         tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
     else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
     else if (strcmp(name, "list_installed_titles") == 0) tool_list_titles(req, id);
+    else if (strcmp(name, "get_dns") == 0)          tool_get_dns(req, id);
+    else if (strcmp(name, "set_dns") == 0)          tool_set_dns(req, id, doc, args);
     else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);
     else if (strcmp(name, "set_auto_time") == 0)    tool_set_auto_time(req, id, doc, args);
     else if (strcmp(name, "get_datetime") == 0)     tool_get_datetime(req, id);
