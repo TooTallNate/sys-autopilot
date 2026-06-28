@@ -315,6 +315,26 @@ meta NCA is still verified.) Both trimmed and full XCI layouts are supported.
 > valid ticket and, for some games, a linked account — that is the title's own
 > DRM, independent of the installer.
 
+### List installed titles
+
+List the applications installed on the console (base titles only — not updates
+or DLC), across the SD card, internal storage, and an inserted gamecard.
+
+```
+GET /titles
+```
+
+```json
+{"titles":[
+  {"titleId":"0100000000010000","version":0,"storage":"sd","name":"Some Game"},
+  {"titleId":"0100000000020000","version":0,"storage":"nand","name":"Another Game"}
+]}
+```
+
+`name` is the title's display name (from its control data); it may be empty if
+the control data isn't available. `storage` is `sd`, `nand`, or `gamecard`.
+Also exposed as the `list_installed_titles` MCP tool.
+
 ### Status
 
 ```

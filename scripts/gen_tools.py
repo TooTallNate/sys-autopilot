@@ -254,6 +254,14 @@ tools = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "list_installed_titles",
+        "description": ("List installed applications (titles) on the console. Returns one line "
+                        "per title: 16-hex title id, content-meta version, storage "
+                        "(sd/nand/gamecard), and display name. Useful for confirming an install "
+                        "or finding a title id. Lists base applications only (not updates or DLC)."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "get_auto_time",
         "description": ("Get whether the clock is automatically synchronized over the internet. "
                         "Returns \"enabled\" or \"disabled\"."),
