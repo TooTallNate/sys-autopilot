@@ -1,5 +1,76 @@
 # sys-autopilot
 
+## 1.5.0
+
+### Minor Changes
+
+- [#21](https://github.com/TooTallNate/sys-autopilot/pull/21) [`a7c9a45`](https://github.com/TooTallNate/sys-autopilot/commit/a7c9a450c325da9667df6c4466ad2b4e211c65c3) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add a tool to list installed titles. `GET /titles` (and the
+  `list_installed_titles` MCP tool) enumerates the base applications installed on
+  the console across SD, internal storage, and an inserted gamecard, returning
+  each title's id, content-meta version, storage, and display name (resolved from
+  its control data / NACP). Read-only — uses the `ncm`/`ns` access the installer
+  already declares, no new NPDM services.
+
+- [#16](https://github.com/TooTallNate/sys-autopilot/pull/16) [`c2a15c3`](https://github.com/TooTallNate/sys-autopilot/commit/c2a15c30fddbd33d402c9e149211a731ab64cb00) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add system-settings tools (REST + MCP):
+
+  - `get_theme` / `set_theme` — read/set the UI theme (light or dark).
+  - `get_nickname` / `set_nickname` — read/set the console's device nickname.
+  - `get_brightness` / `set_brightness` — read/set screen brightness (0.0–1.0).
+  - `get_volume` / `set_volume` — read/set master volume (0.0–1.0).
+  - `airplane_mode` — enable airplane mode (disable wireless). One-way: it cuts
+    the server's own connectivity and cannot be undone remotely, so there is no
+    remote re-enable.
+  - `get_auto_time` / `set_auto_time` — read/set internet clock synchronization.
+  - `get_datetime` / `set_datetime` — read the local date/time/timezone, or set
+    the date/time (written via the network system clock, which the displayed time
+    follows). The timezone can't be changed remotely. If internet time sync is
+    on, the OS may re-sync later; disable it first to make a manual time stick.
+  - `status` now also reports `batteryPercent` and `charging`.
+
+  Exposed both as MCP tools and `/settings/*` REST endpoints. Adds the `lbl`,
+  `audctl`, and `psm` services to the NPDM (theme/nickname/auto-time use the
+  existing `set:sys`, date/time uses `time:s`, airplane mode uses `nifm`).
+
+  Note: `set_theme` updates the stored setting immediately but the HOME menu
+  only reflects it after it reloads (sleep/wake or reboot); brightness and volume
+  take effect live.
+
+- [#18](https://github.com/TooTallNate/sys-autopilot/pull/18) [`af94253`](https://github.com/TooTallNate/sys-autopilot/commit/af94253e704fba9bd515881d12f27c8b6051b9e6) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add network title installation. Stream an NSP straight to the console with a
+  single `curl -T` and it is installed into NCM content storage and registered
+  so it appears on the HOME menu — no SD-card staging, nothing to clean up.
+
+  ```sh
+  curl -g -T "Game [0100...000][v0].nsp" http://<ip>:4150/install
+  ```
+
+  - New `POST`/`PUT /install[?storage=sd|nand]` endpoint. The NSP is streamed
+    (sized from `Content-Length`), so multi-GB titles install without buffering
+    to disk.
+  - Parses the PFS0/NSP, writes each NCA via the NCM placeholder/register flow,
+    verifies each NCA's SHA-256 against its content id, parses the CNMT, sets the
+    content-meta database entry, imports the ticket (`es`), and pushes the
+    application record (`ns`). Rolls back written content on failure.
+  - No external keys required: NCAs are copied byte-for-byte, and the CNMT is read
+    from the registered meta NCA via the firmware's own decryption.
+  - Adds the `ncm`, `ns:am2`, and `es` services to the NPDM and vendors small
+    ns/es IPC wrappers that libnx does not expose.
+
+  NSP only for now; compressed NSZ is planned as a follow-up.
+
+- [#20](https://github.com/TooTallNate/sys-autopilot/pull/20) [`b6c7144`](https://github.com/TooTallNate/sys-autopilot/commit/b6c7144504fc6cbe3d934faf8d81267e017239af) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Install **XCI** (gamecard image) titles via the existing `/install` endpoint.
+  The container format is auto-detected from the stream — `PFS0`/NSP installs as
+  before, and an XCI is recognized by its `HEAD` card-header magic (both trimmed
+  and full layouts). For XCI, the installer skips to the root HFS0, locates the
+  `secure` partition, and streams its NCAs into NCM using the same
+  placeholder/register → CNMT → application-record flow as NSP. Fully streaming
+  (sized from `Content-Length`); no extra sysmodule memory is reserved.
+
+  Verified on hardware: a retail XCI installs and launches.
+
+  Note: gamecard NCAs are not guaranteed to hash to their filename content id, so
+  the per-NCA SHA-256 check (kept for NSP) is skipped for XCI; the meta NCA is
+  still verified and the CNMT drives registration.
+
 ## 1.4.1
 
 ### Patch Changes
