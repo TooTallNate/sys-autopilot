@@ -82,6 +82,7 @@ bool mdns_config_init(MdnsConfig *cfg, const Config *app_cfg) {
 #define DNS_TYPE_PTR  12
 #define DNS_TYPE_TXT  16
 #define DNS_TYPE_SRV  33
+#define DNS_TYPE_NSEC 47
 #define DNS_TYPE_ANY  255
 
 #define DNS_CLASS_IN       1
@@ -173,6 +174,22 @@ static void emit_a(Writer *w, const MdnsConfig *cfg) {
     w_u8(w, (uint8_t)(v >> 16));
     w_u8(w, (uint8_t)(v >> 8));
     w_u8(w, (uint8_t)(v & 0xFF));
+    w_rr_patch(w, at);
+}
+
+// NSEC asserting the host name has an A record and *nothing else* (notably no
+// AAAA). Dual-stack resolvers (e.g. macOS getaddrinfo, used by curl/ping) query
+// A and AAAA together and otherwise block ~5s waiting on the AAAA that never
+// comes; this negative answer lets them proceed immediately. Bundled with the A
+// per RFC 6762 §6.1. rdata: next-name (the same host) + type bitmap window #0
+// with bit 1 (A) set => one byte 0x40.
+static void emit_nsec(Writer *w, const MdnsConfig *cfg) {
+    size_t at = w_rr_head(w, cfg->host, DNS_TYPE_NSEC,
+                          DNS_CLASS_IN | DNS_CLASS_FLUSH, TTL_HOST);
+    w_name(w, cfg->host); // next domain name
+    w_u8(w, 0);           // window block 0
+    w_u8(w, 1);           // bitmap length: 1 byte (types 0-7)
+    w_u8(w, 0x40);        // bit 1 set => type A only
     w_rr_patch(w, at);
 }
 
@@ -364,7 +381,9 @@ size_t mdns_build_response(const MdnsConfig *cfg,
     if (want.want_srv)
         want.want_a = true;
 
-    uint16_t ancount = (uint16_t)(want.want_a + want.want_ptr +
+    // The A always rides with an NSEC asserting "A only" so dual-stack
+    // resolvers don't stall waiting on a nonexistent AAAA.
+    uint16_t ancount = (uint16_t)(want.want_a + want.want_a + want.want_ptr +
                                   want.want_srv + want.want_txt);
     if (ancount == 0)
         return 0;
@@ -374,7 +393,7 @@ size_t mdns_build_response(const MdnsConfig *cfg,
     if (want.want_ptr) emit_ptr(&w, cfg);
     if (want.want_srv) emit_srv(&w, cfg);
     if (want.want_txt) emit_txt(&w, cfg);
-    if (want.want_a)   emit_a(&w, cfg);
+    if (want.want_a) { emit_a(&w, cfg); emit_nsec(&w, cfg); }
 
     return w.ok ? w.len : 0;
 }
@@ -382,11 +401,12 @@ size_t mdns_build_response(const MdnsConfig *cfg,
 size_t mdns_build_announcement(const MdnsConfig *cfg,
                                uint8_t *out, size_t out_cap) {
     Writer w = { out, out_cap, 0, true };
-    w_response_header(&w, 4);
+    w_response_header(&w, 5);
     emit_ptr(&w, cfg);
     emit_srv(&w, cfg);
     emit_txt(&w, cfg);
     emit_a(&w, cfg);
+    emit_nsec(&w, cfg);
     return w.ok ? w.len : 0;
 }
 

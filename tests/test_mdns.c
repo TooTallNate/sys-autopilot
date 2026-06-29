@@ -91,6 +91,7 @@ static size_t make_query_qu(uint8_t *buf, const char *name, uint16_t qtype) {
 #define DNS_PTR 12
 #define DNS_TXT 16
 #define DNS_SRV 33
+#define DNS_NSEC 47
 
 static MdnsConfig make_cfg(void) {
     Config app = {0};
@@ -118,7 +119,18 @@ static void test_a_query(void) {
     assert(a->rdlen == 4);
     // 127.0.0.1 (host-build placeholder)
     assert(a->rdata[0] == 127 && a->rdata[3] == 1);
-    printf("  A query: ok\n");
+
+    // An NSEC must accompany the A asserting "A only" (no AAAA) so dual-stack
+    // resolvers don't stall ~5s waiting on a nonexistent AAAA.
+    const Rec *nsec = find(recs, n, DNS_NSEC);
+    assert(nsec);
+    assert(strcmp(nsec->name, "test-switch.local") == 0);
+    // rdata = next-name (skip) + window 0 + bitmap len 1 + 0x40 (bit 1 = A).
+    char nxt[128];
+    size_t bo = (size_t)(nsec->rdata - out);
+    bo = read_name(out, rn, bo, nxt, sizeof(nxt));
+    assert(out[bo] == 0 && out[bo + 1] == 1 && out[bo + 2] == 0x40);
+    printf("  A query: ok (with NSEC no-AAAA)\n");
 }
 
 static void test_ptr_browse(void) {
@@ -267,9 +279,10 @@ static void test_announcement(void) {
     assert(rn > 0);
     Rec recs[8];
     int n = parse_answers(out, rn, recs, 8);
-    assert(n == 4);
+    assert(n == 5);
     assert(find(recs, n, DNS_PTR) && find(recs, n, DNS_SRV) &&
-           find(recs, n, DNS_TXT) && find(recs, n, DNS_A));
+           find(recs, n, DNS_TXT) && find(recs, n, DNS_A) &&
+           find(recs, n, DNS_NSEC));
     printf("  announcement: ok\n");
 }
 
