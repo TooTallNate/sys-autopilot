@@ -44,7 +44,7 @@ static int create_listener(int port) {
         close(fd);
         return -1;
     }
-    if (listen(fd, 4) != 0) {
+    if (listen(fd, 16) != 0) {
         close(fd);
         return -1;
     }
@@ -60,15 +60,37 @@ static bool path_is_public(const HttpRequest *req) {
            strcmp(req->method, "OPTIONS") == 0;
 }
 
-static void handle_connection(int fd, const Config *cfg) {
-    // Non-blocking I/O: the http layer waits via poll() with an inactivity
-    // timeout, so a stalled client can't wedge the server, and the idle
-    // callback keeps running during slow transfers.
-    set_nonblocking(fd);
+// Drains any request body the handler didn't consume, so the next request on a
+// kept-alive connection starts on a clean boundary. Returns false if the body
+// is unexpectedly large/stalled (treat as non-reusable).
+static bool drain_body(HttpRequest *req) {
+    if (!req->has_content_length)
+        return true;
+    char scratch[1024];
+    int guard = 0;
+    while (req->body_consumed < req->content_length) {
+        if (++guard > 4096) // ~4MB cap; runaway -> just close
+            return false;
+        if (http_read_body(req, scratch, sizeof(scratch)) <= 0)
+            return false;
+    }
+    return true;
+}
 
+typedef enum { CONN_CLOSE, CONN_KEEP } ConnDisp;
+
+// Handles one request. Returns CONN_KEEP if the connection may be reused
+// (keep-alive, body drained) or CONN_CLOSE to close.
+static ConnDisp handle_one(int fd, const Config *cfg) {
     static HttpRequest req; // single-threaded server; keep off the stack
     if (!http_read_request(fd, &req))
-        return;
+        return CONN_CLOSE;
+
+    // Keep-alive for HTTP/1.1 so the MCP SDK can reuse one socket across
+    // initialize -> notifications/initialized -> tools/list. The GET stream is
+    // declined with 405+close, so nothing tries to pipeline onto it.
+    req.keep_alive = req.http11 && !req.conn_close;
+    http_set_keep_alive(req.keep_alive);
 
     if (config_auth_enabled(cfg) && !path_is_public(&req)) {
         bool basic_cfg = cfg->username[0] != '\0' && cfg->password[0] != '\0';
@@ -88,11 +110,38 @@ static void handle_connection(int fd, const Config *cfg) {
             // Bearer is always offered: OAuth-capable clients use the
             // resource_metadata hint to run the browser flow.
             http_send_unauthorized(&req, basic_cfg, true);
-            return;
+            return (req.keep_alive && drain_body(&req)) ? CONN_KEEP : CONN_CLOSE;
         }
     }
 
     routes_handle(&req);
+    return (req.keep_alive && drain_body(&req)) ? CONN_KEEP : CONN_CLOSE;
+}
+
+// Serves an accepted connection (one or more keep-alive requests).
+static void handle_connection(int fd, const Config *cfg) {
+    // Non-blocking I/O: the http layer waits via poll() with an inactivity
+    // timeout, so a stalled client can't wedge the server, and the idle
+    // callback keeps running during slow transfers.
+    set_nonblocking(fd);
+
+    // Serve multiple requests on one connection (HTTP/1.1 keep-alive). Bounded
+    // so a single client can't monopolize the single-threaded server; the next
+    // read blocks on the 10s http I/O timeout, so an idle peer disconnects. MCP
+    // clients reuse the socket across initialize -> initialized -> tools/list,
+    // so closing after each response broke their transport.
+    for (int served = 0; served < 64; served++) {
+        if (handle_one(fd, cfg) != CONN_KEEP)
+            break;
+        // Keep-alive: only stay if the next request is already arriving. The
+        // server is single-threaded, so blocking here on a quiet socket would
+        // starve everyone else; if the peer isn't immediately pipelining, close
+        // and let it reconnect (the response already advertised keep-alive, so
+        // pooled clients just open a fresh socket).
+        struct pollfd p = { .fd = fd, .events = POLLIN };
+        if (poll(&p, 1, 50) <= 0)
+            break;
+    }
 }
 
 // Sleeps ~1s in 100ms slices, invoking the idle callback each slice so the
@@ -197,7 +246,7 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
                     mdns_close(mdns_fd);
                     mdns_fd = -1;
                 }
-                mdns_ready = false; // re-query the IP on the next iteration
+                    mdns_ready = false; // re-query the IP on the next iteration
             }
         }
 
@@ -244,11 +293,13 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
         pfds[0].events = POLLIN;
         pfds[0].revents = 0;
         nfds_t nfds = 1;
+        int mdns_idx = -1;
         if (mdns_fd >= 0) {
-            pfds[1].fd = mdns_fd;
-            pfds[1].events = POLLIN;
-            pfds[1].revents = 0;
-            nfds = 2;
+            mdns_idx = (int)nfds;
+            pfds[nfds].fd = mdns_fd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
         }
         int pr = poll(pfds, nfds, 100);
 
@@ -272,7 +323,7 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
             continue;
 
         // Service mDNS queries before HTTP accepts.
-        if (mdns_fd >= 0 && (pfds[1].revents & POLLIN))
+        if (mdns_idx >= 0 && (pfds[mdns_idx].revents & POLLIN))
             mdns_handle_readable(mdns_fd, &mdns_cfg);
 
         if (!(pfds[0].revents & POLLIN))
@@ -287,6 +338,9 @@ void server_run(const Config *cfg, ServerIdleCb idle) {
         }
 
         handle_connection(client, cfg);
+        // Half-close the write side first so the peer reliably sees a FIN
+        // (not an RST from leftover unread bytes), then close.
+        shutdown(client, SHUT_WR);
         close(client);
 
         // Agent-requested power action: executed only after the response has

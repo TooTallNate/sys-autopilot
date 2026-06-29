@@ -1061,3 +1061,24 @@ void mcp_handle_post(HttpRequest *req) {
     // Whatever happened, no upload temp state may survive the request.
     upload_cleanup();
 }
+
+void mcp_handle_get(HttpRequest *req) {
+    // We have no server-initiated messages, so we decline the optional
+    // server->client SSE stream with 405 (spec-sanctioned; capable clients
+    // proceed over POST). Force the connection closed so the client retires
+    // this socket cleanly rather than reusing it into a reset.
+    static const char body[] = "{\"error\":\"method not allowed\"}";
+    char hdr[256];
+    int n = snprintf(hdr, sizeof(hdr),
+                     "HTTP/1.1 405 Method Not Allowed\r\n"
+                     "Server: sys-autopilot\r\n"
+                     "Access-Control-Allow-Origin: *\r\n"
+                     "Content-Type: application/json\r\n"
+                     "Content-Length: %zu\r\n"
+                     "Connection: close\r\n"
+                     "\r\n",
+                     sizeof(body) - 1);
+    http_write_all(req->fd, hdr, (size_t)n);
+    http_write_all(req->fd, body, sizeof(body) - 1);
+    req->keep_alive = false;
+}
