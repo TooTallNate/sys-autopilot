@@ -17,6 +17,9 @@ typedef struct {
     bool   has_content_length;
     bool   expect_100;          // Client sent "Expect: 100-continue"
     bool   sent_100;
+    bool   http11;              // request used HTTP/1.1 (keep-alive by default)
+    bool   conn_close;          // client sent "Connection: close"
+    bool   keep_alive;          // negotiated: reuse the connection after this
     // Body bytes that were read together with the headers.
     const char *body_leftover;
     size_t      body_leftover_len;
@@ -28,6 +31,10 @@ typedef struct {
 // Return false to abort the transfer (used for clean shutdown).
 typedef bool (*HttpIdleCb)(void);
 void http_set_idle_callback(HttpIdleCb cb);
+
+// Set whether response helpers advertise keep-alive vs close. The server sets
+// this per request before dispatching the handler.
+void http_set_keep_alive(bool on);
 
 // Reads and parses a request's start-line + headers from fd.
 // Sockets may be non-blocking: all I/O internally waits via poll() with a

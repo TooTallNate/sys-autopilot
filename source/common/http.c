@@ -19,8 +19,22 @@
 
 static HttpIdleCb g_idle_cb;
 
+// Whether the response helpers should advertise keep-alive. Set per request by
+// the server once it decides the connection is reusable. Defaults to close so
+// any path that forgets to set it is safe.
+static bool g_keep_alive;
+
 void http_set_idle_callback(HttpIdleCb cb) {
     g_idle_cb = cb;
+}
+
+void http_set_keep_alive(bool on) {
+    g_keep_alive = on;
+}
+
+static const char *conn_hdr(void) {
+    return g_keep_alive ? "Connection: keep-alive\r\nKeep-Alive: timeout=10\r\n"
+                        : "Connection: close\r\n";
 }
 
 // Waits until fd is ready for `events`. Returns false on inactivity timeout,
@@ -175,6 +189,8 @@ bool http_read_request(int fd, HttpRequest *req) {
     if (!sp2)
         return false;
     *sp2 = '\0';
+    // HTTP version follows: keep-alive is the default for HTTP/1.1.
+    req->http11 = strncmp(sp2 + 1, "HTTP/1.1", 8) == 0;
 
     char *qmark = strchr(target, '?');
     if (qmark) {
@@ -201,6 +217,9 @@ bool http_read_request(int fd, HttpRequest *req) {
         } else if (header_is(cursor, "Expect", &value)) {
             if (strncasecmp(value, "100-continue", 12) == 0)
                 req->expect_100 = true;
+        } else if (header_is(cursor, "Connection", &value)) {
+            if (strncasecmp(value, "close", 5) == 0)
+                req->conn_close = true;
         }
 
         cursor = next ? next + 2 : NULL;
@@ -325,9 +344,10 @@ void http_send_header(int fd, int code, const char *content_type, size_t content
                      "Access-Control-Allow-Origin: *\r\n"
                      "Content-Type: %s\r\n"
                      "Content-Length: %zu\r\n"
-                     "Connection: close\r\n"
+                     "%s"
                      "\r\n",
-                     code, status_reason(code), content_type, content_length);
+                     code, status_reason(code), content_type, content_length,
+                     conn_hdr());
     http_write_all(fd, hdr, (size_t)n);
 }
 
@@ -338,9 +358,9 @@ void http_send_redirect(int fd, const char *location) {
                      "Server: sys-autopilot\r\n"
                      "Location: %s\r\n"
                      "Content-Length: 0\r\n"
-                     "Connection: close\r\n"
+                     "%s"
                      "\r\n",
-                     location);
+                     location, conn_hdr());
     if (n > 0 && (size_t)n < sizeof(hdr))
         http_write_all(fd, hdr, (size_t)n);
 }
@@ -397,9 +417,9 @@ void http_send_unauthorized(const HttpRequest *req, bool offer_basic, bool offer
                      "%s"
                      "Content-Type: application/json\r\n"
                      "Content-Length: %zu\r\n"
-                     "Connection: close\r\n"
+                     "%s"
                      "\r\n",
-                     challenges, strlen(body));
+                     challenges, strlen(body), conn_hdr());
     http_write_all(req->fd, hdr, (size_t)n);
     http_write_all(req->fd, body, strlen(body));
 }

@@ -549,6 +549,7 @@ static const Route kRoutes[] = {
     { "POST",   "/install",           handle_install },
     { "PUT",    "/install",           handle_install },
     { "POST",   "/mcp",               mcp_handle_post },
+    { "GET",    "/mcp",               mcp_handle_get },
     { "POST",   "/power/sleep",       handle_power_sleep },
     { "POST",   "/power/restart",     handle_power_restart },
     { "POST",   "/power/off",         handle_power_off },
