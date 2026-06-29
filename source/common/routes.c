@@ -4,6 +4,7 @@
 #include "input.h"
 #include "install.h"
 #include "titles.h"
+#include "network.h"
 #include "json.h"
 #include "mcp.h"
 #include "oauth.h"
@@ -404,6 +405,57 @@ static void handle_titles(HttpRequest *req) {
     http_send_response(req->fd, 200, "application/json", body, pos);
 }
 
+// --- /network/dns ------------------------------------------------------------
+
+static void handle_dns_get(HttpRequest *req) {
+    DnsConfig c;
+    char err[96];
+    if (!network_get_dns(&c, err, sizeof(err))) {
+        http_send_error(req->fd, 500, err);
+        return;
+    }
+    http_send_json(req->fd, 200,
+        "{\"automatic\":%s,\"primary\":\"%s\",\"secondary\":\"%s\"}",
+        c.is_automatic ? "true" : "false", c.primary, c.secondary);
+}
+
+// POST {"automatic":true} | {"primary":"1.2.3.4","secondary":"5.6.7.8"}
+static void handle_dns_set(HttpRequest *req) {
+    static JsonDoc doc;
+    int root = read_json_body(req, &doc);
+    if (root < 0)
+        return;
+
+    bool automatic = false;
+    int t = json_obj_get(&doc, root, "automatic");
+    if (t >= 0)
+        json_get_bool(&doc, t, &automatic);
+
+    // Buffers sized generously: json_get_string needs headroom (it reserves a
+    // few bytes for escape expansion), so a 16-byte buffer would reject a full
+    // 15-char dotted IPv4. network_set_dns validates the actual format.
+    char primary[64] = {0}, secondary[64] = {0};
+    t = json_obj_get(&doc, root, "primary");
+    if (t >= 0) json_get_string(&doc, t, primary, sizeof(primary));
+    t = json_obj_get(&doc, root, "secondary");
+    if (t >= 0) json_get_string(&doc, t, secondary, sizeof(secondary));
+
+    if (!automatic && !primary[0]) {
+        http_send_error(req->fd, 400, "provide 'primary' (IPv4) or set 'automatic':true");
+        return;
+    }
+
+    char err[96];
+    if (!network_set_dns(automatic, primary, secondary, err, sizeof(err)))
+        http_send_error(req->fd, 500, err);
+    else if (automatic)
+        http_send_json(req->fd, 200, "{\"ok\":true,\"automatic\":true}");
+    else
+        http_send_json(req->fd, 200,
+            "{\"ok\":true,\"automatic\":false,\"primary\":\"%s\",\"secondary\":\"%s\"}",
+            primary, secondary);
+}
+
 // --- /install ----------------------------------------------------------------
 
 // Adapts the HTTP request body into the installer's sequential read callback.
@@ -492,6 +544,8 @@ static const Route kRoutes[] = {
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
     { "GET",    "/titles",            handle_titles },
+    { "GET",    "/network/dns",       handle_dns_get },
+    { "POST",   "/network/dns",       handle_dns_set },
     { "POST",   "/install",           handle_install },
     { "PUT",    "/install",           handle_install },
     { "POST",   "/mcp",               mcp_handle_post },

@@ -13,10 +13,20 @@ static uint32_t g_last_addr; // last sampled s_addr (0 = none/loopback)
 bool netif_init(void) {
     if (g_nifm_ready)
         return true;
-    Result rc = nifmInitialize(NifmServiceType_User);
+    // Open nifm as Admin (a superset of User). libnx's nifmInitialize is
+    // refcounted and ignores the service type on subsequent calls, so the FIRST
+    // init in the process decides the session type. Using Admin here means
+    // later admin-only calls (e.g. nifmSetNetworkProfile for DNS config) work;
+    // the read-only calls this module makes are fine over an admin session.
+    Result rc = nifmInitialize(NifmServiceType_Admin);
     if (R_FAILED(rc)) {
-        LOGF("netif: nifmInitialize failed rc=0x%x\n", rc);
-        return false;
+        // Fall back to User if Admin is somehow unavailable (read-only still ok).
+        LOGF("netif: nifm:a init failed rc=0x%x, trying nifm:u\n", rc);
+        rc = nifmInitialize(NifmServiceType_User);
+        if (R_FAILED(rc)) {
+            LOGF("netif: nifmInitialize failed rc=0x%x\n", rc);
+            return false;
+        }
     }
     g_nifm_ready = true;
     return true;

@@ -359,6 +359,33 @@ GET /titles
 the control data isn't available. `storage` is `sd`, `nand`, or `gamecard`.
 Also exposed as the `list_installed_titles` MCP tool.
 
+### Network DNS
+
+Read or change the DNS servers for the active network connection. Useful for
+pointing the console at a custom/black-hole DNS (e.g. 90DNS) while keeping it on
+the LAN.
+
+```
+GET  /network/dns                                  read current DNS config
+POST /network/dns                                  set DNS
+```
+
+```sh
+curl --netrc "http://<ip>:4150/network/dns"
+# -> {"automatic":true,"primary":"192.168.1.1","secondary":"0.0.0.0"}
+
+# set manual DNS:
+curl --netrc -X POST "http://<ip>:4150/network/dns" \
+  -d '{"primary":"207.246.121.77","secondary":"163.172.141.219"}'
+
+# revert to DHCP-provided DNS:
+curl --netrc -X POST "http://<ip>:4150/network/dns" -d '{"automatic":true}'
+```
+
+Setting DNS rewrites the active connection profile, so the connection may blip
+briefly while it re-applies. Also exposed as the `get_dns` / `set_dns` MCP
+tools. (Requires the `nifm:a` admin service, which the sysmodule opens at boot.)
+
 ### Status
 
 ```
