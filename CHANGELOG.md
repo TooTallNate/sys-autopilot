@@ -1,5 +1,38 @@
 # sys-autopilot
 
+## 1.6.0
+
+### Minor Changes
+
+- [#22](https://github.com/TooTallNate/sys-autopilot/pull/22) [`9d8a105`](https://github.com/TooTallNate/sys-autopilot/commit/9d8a105e8371a8ea52cb9153e8886340ae36cf8b) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add DNS configuration for the active network connection. `GET /network/dns`
+  reads the current config (automatic/manual + primary/secondary servers) and
+  `POST /network/dns` sets manual DNS servers or reverts to DHCP — handy for
+  pointing the console at a custom/black-hole DNS while keeping it on the LAN.
+  Also exposed as the `get_dns` / `set_dns` MCP tools.
+
+  Setting the profile requires the `nifm:a` admin service. Because libnx's
+  `nifmInitialize` is refcounted and ignores the service type after the first
+  call, the sysmodule now opens nifm as Admin at boot (a superset of the User
+  session used for mDNS) so the profile write is authorized.
+
+### Patch Changes
+
+- [#25](https://github.com/TooTallNate/sys-autopilot/pull/25) [`51a249c`](https://github.com/TooTallNate/sys-autopilot/commit/51a249ca27be371020aaec1d2d1b0590e7cb3de3) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Support HTTP/1.1 keep-alive so MCP clients can reuse one connection across
+  initialize → notifications/initialized → tools/list. Responses previously
+  forced `Connection: close`, which made the Streamable HTTP transport's reused
+  socket get reset ("socket connection closed unexpectedly"). The server now
+  keeps the connection alive when the client speaks HTTP/1.1, drains the request
+  body between requests, and half-closes cleanly to avoid RSTs. `GET /mcp`
+  returns 405 (no server-initiated SSE stream offered), the spec-sanctioned way
+  to decline the optional channel.
+
+- [#24](https://github.com/TooTallNate/sys-autopilot/pull/24) [`b524891`](https://github.com/TooTallNate/sys-autopilot/commit/b52489188a4f013e61e910d12cb318f60466ee73) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Fix ~5s latency on every request when reaching the console by its `.local`
+  hostname. The mDNS responder answered A queries but stayed silent for AAAA, so
+  dual-stack resolvers (macOS `getaddrinfo`, used by curl/ping and MCP clients)
+  blocked ~5s waiting on a nonexistent AAAA before falling back to IPv4. The A
+  record and the announcement now carry an NSEC record asserting "A only, no
+  AAAA" per RFC 6762 §6.1, so resolvers proceed immediately.
+
 ## 1.5.0
 
 ### Minor Changes
