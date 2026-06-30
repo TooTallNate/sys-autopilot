@@ -20,7 +20,6 @@
     "@tootallnate/zstd-wasm": "^0.1.0"
   },
   "devDependencies": {
-    "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0"
   }
 }
