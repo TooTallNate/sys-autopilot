@@ -24,11 +24,11 @@ void settings_init(void) {
     // the process lifetime (setsysInitialize is refcounted).
     g_setsys_ok = R_SUCCEEDED(setsysInitialize());
     g_lbl_ok    = R_SUCCEEDED(lblInitialize());
-    g_audctl_ok = R_SUCCEEDED(audctlInitialize());
+    // audctl is disabled on FW 22.1.0 sysmodules to avoid audio IPC deadlocks/hangs.
+    g_audctl_ok = false;
     g_psm_ok    = R_SUCCEEDED(psmInitialize());
     if (!g_setsys_ok) LOGF("settings: set:sys init failed\n");
     if (!g_lbl_ok)    LOGF("settings: lbl init failed\n");
-    if (!g_audctl_ok) LOGF("settings: audctl init failed\n");
     if (!g_psm_ok)    LOGF("settings: psm init failed\n");
 }
 

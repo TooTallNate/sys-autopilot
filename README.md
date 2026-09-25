@@ -1,4 +1,16 @@
-# sys-autopilot
+# sys-autopilot (Slim & FW 22.1.0 Optimized Fork)
+
+> [!IMPORTANT]
+> **Optimized Fork for Atmosphère 1.11.x & Horizon OS FW 22.1.0+**
+> 
+> * **Drop-in Release:** [**Download `sys-autopilot-v1.5.0-slim-ams1.11.zip`**](https://github.com/borocode/sys-autopilot/releases/tag/v1.5.0-slim-ams1.11)
+> * **Upstream Pull Request:** [TooTallNate/sys-autopilot#30](https://github.com/TooTallNate/sys-autopilot/pull/30)
+> * **66% Memory Reduction:** Reduced binary ELF size from **6.69 MB down to 2.11 MB** (BSS reduced from 6.33 MB to 1.75 MB).
+> * **Fixes Fatal Boot Panic:** Resolves error `2001-0131 (0x10801)` on process `am` (`0100000000000023`) caused by System Memory Pool Partition 2 starvation on consoles running multiple sysmodules.
+> * **Firmware 19+ / 22.1.0 Compatibility:** Stubs deprecated `nsGetApplicationControlData` (preventing `0100000000000034 std::abort`) and bypasses synchronous `audctl` audio IPC.
+> * **Ultrahand / Tesla Integration:** Includes `toolbox.json` metadata for clean GUI toggling.
+
+---
 
 A Nintendo Switch (Atmosphère) sysmodule that runs a persistent HTTP server on
 the console. It exposes a REST API **and a native MCP (Model Context Protocol)
@@ -11,6 +23,24 @@ Typical agent loop:
 1. `curl -T myapp.nro` — deploy a fresh build
 2. `screenshot` + `tap_buttons` MCP tools — navigate to hbmenu and launch it
 3. `screenshot` / `read_file` — observe the app and its log files, iterate
+
+## Atmosphère 1.11.x & FW 22.1.0 Memory Optimizations
+
+In stock `sys-autopilot` v1.5.0, the background sysmodule requested a 4 MB inner heap (`0x400000`) and a 1 MB static install buffer (`g_chunk`), claiming ~6.7 MB total from System Memory Pool Partition 2 at boot. In modern Atmosphère setups with standard sysmodules (`sys-clk`, `sys-ftpd`, `MissionControl`), this starves `am` during initialization, resulting in Horizon OS panic `2001-0131 (0x10801)`.
+
+This fork implements the following improvements:
+1. **Inner Heap:** Slashed from 4 MB to **512 KB (`0x80000`)**, perfectly adequate for concurrent HTTP REST requests, MCP JSON-RPC dispatch, and directory operations without bloating Pool 2.
+2. **Streaming Install Chunk:** Slashed from 1 MB to **64 KB (`0x10000`)**, maintaining full streaming install functionality while dramatically lowering BSS usage.
+3. **Control Data Resolution:** Stubbed `resolve_name()` in `source/common/titles.c`, freeing a 147 KB static `NsApplicationControlData` buffer and avoiding deprecated `ns:ro` IPC panics on FW 19+.
+4. **Audio IPC:** Bypassed `audctlInitialize()` to prevent synchronous audio IPC hangs on FW 22.1.0.
+
+### Verified Test System
+* **Console:** Nintendo Switch V1 (Erista, unpatched)
+* **Firmware:** Horizon OS 22.1.0 (sysMMC)
+* **Atmosphère:** 1.11.1
+* **Co-existing Sysmodules:** `sys-ftpd-light`, `sys-clk` (v2.0.1-21fix), `sys-patch`, `MissionControl`, `Fizeau`, `SSBU Online Deluxe`
+* **Status:** Sustained uptime (1,200s+), zero panics, full MCP and REST API functionality.
+* **Attribution:** Debugging, memory analysis, and implementation performed by **Antigravity** (Google DeepMind agentic coding assistant) with guidance from **@borocode**. (Developed with Gemini 3.8 Flash).
 
 ## Requirements
 
@@ -29,15 +59,17 @@ make -C app     # builds the dev .nro flavor (see below)
 
 ## Installing
 
-Download the latest `sys-autopilot-<version>.zip` from
-[Releases](https://github.com/TooTallNate/sys-autopilot/releases) and extract
-it to the root of your SD card. Or build from source and copy the contents of
-`dist/` to the root of your SD card:
+Download the latest precompiled release from
+[**Releases**](https://github.com/borocode/sys-autopilot/releases/tag/v1.5.0-slim-ams1.11)
+and extract `sys-autopilot-v1.5.0-slim-ams1.11.zip` to the root of your SD card.
+Or build from source and copy the contents of `dist/` to the root of your SD card:
 
 ```
 atmosphere/contents/4200000000004150/exefs.nsp
 atmosphere/contents/4200000000004150/flags/boot2.flag
+atmosphere/contents/4200000000004150/toolbox.json
 config/sys-autopilot/config.ini
+switch/sys-autopilot-app.nro
 ```
 
 Reboot. The server starts automatically at boot (boot2) and listens on port

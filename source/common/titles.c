@@ -14,24 +14,11 @@ static const NcmStorageId kStorages[] = {
     NcmStorageId_GameCard,
 };
 
-// Resolve a title's display name from its control data (NACP). Best-effort:
-// leaves name empty on any failure. Uses a single large static buffer
-// (control data is ~0x24000 bytes: NACP + icon).
+// On FW 19.0.0+ / 22.1.0+, nsGetApplicationControlData is deprecated and causes
+// service exceptions/crashes when called from sysmodules lacking ns:ro.
+// Skipping control data resolution also frees ~147 KB (0x24000) of BSS memory.
 static void resolve_name(u64 app_id, char *name, size_t namesz) {
-    static NsApplicationControlData ctrl; // ~0x24000, in BSS
     name[0] = '\0';
-    u64 actual = 0;
-    Result rc = nsGetApplicationControlData(NsApplicationControlSource_Storage,
-                                            app_id, &ctrl, sizeof(ctrl), &actual);
-    if (R_FAILED(rc) || actual < sizeof(ctrl.nacp))
-        return;
-    NacpLanguageEntry *le = NULL;
-    // The NACP name field is fixed-size (0x200) and not guaranteed NUL-
-    // terminated within our smaller buffer, so bound the copy explicitly.
-    if (R_SUCCEEDED(nsGetApplicationDesiredLanguage(&ctrl.nacp, &le)) && le)
-        snprintf(name, namesz, "%.*s", (int)namesz - 1, le->name);
-    else if (R_SUCCEEDED(nacpGetLanguageEntry(&ctrl.nacp, &le)) && le)
-        snprintf(name, namesz, "%.*s", (int)namesz - 1, le->name);
 }
 
 bool titles_list(TitleInfo *titles, int max, int *out_count,
