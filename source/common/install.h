@@ -98,6 +98,22 @@ typedef enum {
 ContainerKind container_detect(const uint8_t *buf, size_t len,
                                uint64_t *out_xci_root);
 
+// --- prefixed stream reader (pure) ------------------------------------------
+
+// Serves `prefix_len` already-read bytes from `prefix` before falling through
+// to read_fn(ctx,...). The installer sniffs a fixed-size prefix to detect the
+// container type; whatever the container header doesn't consume belongs to the
+// first entries and must be replayed, not dropped.
+typedef struct {
+    InstallReadFn read_fn;
+    void *ctx;
+    const uint8_t *prefix;
+    size_t prefix_len;
+} InstallPrefixReader;
+
+// InstallReadFn-compatible: `ctx` is an InstallPrefixReader*.
+long install_prefix_read(void *ctx, void *buf, size_t len);
+
 // --- installer (Switch only) -------------------------------------------------
 
 #ifdef __SWITCH__
