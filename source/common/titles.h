@@ -9,18 +9,28 @@
 // Read-only — no NPDM changes beyond the ncm/ns access the installer already
 // declares.
 
-#define TITLES_MAX 256
-
 typedef struct {
     uint64_t title_id;     // application (base) id
     uint32_t version;      // content-meta version
     uint8_t  storage_id;   // NcmStorageId (2=GameCard, 4=NAND, 5=SD)
-    char     name[80];     // display name (NACP), may be empty if unavailable
+    char     name[80];     // display name (NACP, valid UTF-8), may be empty
 } TitleInfo;
 
+// Called once per listed title, in order. Return false to stop early (e.g.
+// the caller ran out of memory); titles_foreach then returns false with err
+// left empty.
+typedef bool (*TitlesVisitFn)(const TitleInfo *t, void *ctx);
+
 // Lists installed applications across the SD card, internal (NAND user), and
-// gamecard storages. Fills titles[] up to max, sets *out_count. Returns true on
+// gamecard storages, with no upper bound on the count. Visits the entries in
+// [offset, offset + limit) (limit < 0 = through the end); display names are
+// resolved only for visited entries. *out_total (optional) receives the total
+// number of installed applications regardless of the window. Returns true on
 // success (an empty list is still success). On failure writes a short message
-// to err. (Host build: a stub that returns an empty list.)
-bool titles_list(TitleInfo *titles, int max, int *out_count,
-                 char *err, size_t errsz);
+// to err. (Host build: a stub listing `titles_stub_count` synthetic titles.)
+bool titles_foreach(int offset, int limit, TitlesVisitFn fn, void *ctx,
+                    int *out_total, char *err, size_t errsz);
+
+#ifndef __SWITCH__
+extern int titles_stub_count; // host tests: how many fake titles to list
+#endif

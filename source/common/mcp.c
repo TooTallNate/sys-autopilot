@@ -734,29 +734,74 @@ static void tool_airplane_mode(HttpRequest *req, const char *id) {
                  "wireless is re-enabled physically on the console.");
 }
 
-static void tool_list_titles(HttpRequest *req, const char *id) {
-    static TitleInfo titles[TITLES_MAX];
-    int count = 0;
+// list_installed_titles pages so a console with hundreds of games doesn't
+// flood the model's context; the default matches the old fixed cap.
+#define TITLES_PAGE_DEFAULT 256
+#define TITLES_PAGE_MAX     1000
+#define TITLE_LINE_MAX      160
+
+typedef struct {
+    char *text;
+    size_t pos;
+    int count;
+} TitlesText;
+
+static bool titles_text_visit(const TitleInfo *t, void *ctx) {
+    TitlesText *tt = ctx;
+    const char *storage =
+        t->storage_id == 5 ? "sd" :
+        t->storage_id == 4 ? "nand" :
+        t->storage_id == 2 ? "gamecard" : "other";
+    tt->pos += (size_t)snprintf(tt->text + tt->pos, TITLE_LINE_MAX,
+        "%s%016llx  v%-6u  %-8s  %s", tt->count ? "\n" : "",
+        (unsigned long long)t->title_id, t->version, storage,
+        t->name[0] ? t->name : "(name unavailable)");
+    tt->count++;
+    return true;
+}
+
+static void tool_list_titles(HttpRequest *req, const char *id,
+                             const JsonDoc *doc, int args) {
+    int offset = get_int_or(doc, args, "offset", 0);
+    int limit = get_int_or(doc, args, "limit", TITLES_PAGE_DEFAULT);
+    if (offset < 0)
+        offset = 0;
+    if (limit < 1)
+        limit = 1;
+    if (limit > TITLES_PAGE_MAX)
+        limit = TITLES_PAGE_MAX;
+
+    // Each line is bounded (fixed fields + an 80-byte name), so the page fits.
+    size_t cap = (size_t)limit * TITLE_LINE_MAX + 160;
+    TitlesText tt = { malloc(cap), 0, 0 };
+    if (!tt.text) {
+        send_tool_error(req->fd, id, "out of memory");
+        return;
+    }
+    tt.text[0] = '\0';
+    int total = 0;
     char err[128] = {0};
-    if (!titles_list(titles, TITLES_MAX, &count, err, sizeof(err))) {
+    if (!titles_foreach(offset, limit, titles_text_visit, &tt, &total,
+                        err, sizeof(err))) {
+        free(tt.text);
         send_tool_error(req->fd, id, err[0] ? err : "failed to list titles");
         return;
     }
-    static char text[TITLES_MAX * 128 + 64];
-    size_t pos = 0;
-    if (count == 0)
-        pos += (size_t)snprintf(text, sizeof(text), "(no titles installed)");
-    for (int i = 0; i < count && pos < sizeof(text) - 128; i++) {
-        const char *storage =
-            titles[i].storage_id == 5 ? "sd" :
-            titles[i].storage_id == 4 ? "nand" :
-            titles[i].storage_id == 2 ? "gamecard" : "other";
-        pos += (size_t)snprintf(text + pos, sizeof(text) - pos,
-            "%s%016llx  v%-6u  %-8s  %s", i ? "\n" : "",
-            (unsigned long long)titles[i].title_id, titles[i].version, storage,
-            titles[i].name[0] ? titles[i].name : "(name unavailable)");
-    }
-    send_tool_ok(req->fd, id, text);
+    char *end = tt.text + tt.pos;
+    size_t left = cap - tt.pos;
+    if (total == 0)
+        snprintf(end, left, "(no titles installed)");
+    else if (tt.count == 0)
+        snprintf(end, left, "(no titles at offset %d; %d installed)", offset, total);
+    else if (offset + tt.count < total)
+        snprintf(end, left, "\n(showing %d-%d of %d installed titles; call again "
+                 "with offset=%d for more)", offset + 1, offset + tt.count, total,
+                 offset + tt.count);
+    else if (offset > 0)
+        snprintf(end, left, "\n(showing %d-%d of %d installed titles)",
+                 offset + 1, offset + tt.count, total);
+    send_tool_ok(req->fd, id, tt.text);
+    free(tt.text);
 }
 
 static void tool_get_dns(HttpRequest *req, const char *id) {
@@ -965,7 +1010,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
     else if (strcmp(name, "set_volume") == 0)
         tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
     else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
-    else if (strcmp(name, "list_installed_titles") == 0) tool_list_titles(req, id);
+    else if (strcmp(name, "list_installed_titles") == 0) tool_list_titles(req, id, doc, args);
     else if (strcmp(name, "get_dns") == 0)          tool_get_dns(req, id);
     else if (strcmp(name, "set_dns") == 0)          tool_set_dns(req, id, doc, args);
     else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);

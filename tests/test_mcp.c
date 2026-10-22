@@ -15,6 +15,7 @@
 #include "mcp.h"
 #include "oauth.h"
 #include "power.h"
+#include "titles.h"
 
 extern uint64_t stub_tap_mask;
 extern int stub_tap_duration;
@@ -359,6 +360,67 @@ static void test_power_tools(void) {
     printf("power tools ok\n");
 }
 
+static int count_lines_with(const char *r, const char *needle) {
+    int n = 0;
+    for (const char *p = r; (p = strstr(p, needle)); p += strlen(needle))
+        n++;
+    return n;
+}
+
+static void test_list_titles(void) {
+    // Empty console.
+    titles_stub_count = 0;
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "(no titles installed)"));
+
+    // Under the default page: everything, no paging note (unchanged output).
+    titles_stub_count = 3;
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{}}}");
+    assert(count_lines_with(r, "Title ") == 3);
+    assert(!strstr(r, "showing"));
+
+    // More than the old 256 cap: first page says how to continue...
+    titles_stub_count = 300;
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":32,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{}}}");
+    assert(count_lines_with(r, "Title ") == 256);
+    assert(strstr(r, "Title 255"));
+    assert(!strstr(r, "Title 256"));
+    assert(strstr(r, "showing 1-256 of 300"));
+    assert(strstr(r, "offset=256"));
+
+    // ...and the next page returns the rest.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{\"offset\":256}}}");
+    assert(count_lines_with(r, "Title ") == 44);
+    assert(strstr(r, "Title 256"));
+    assert(strstr(r, "Title 299"));
+    assert(strstr(r, "showing 257-300 of 300"));
+    assert(!strstr(r, "for more"));
+
+    // Explicit limit, and an offset past the end.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":34,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{\"offset\":10,\"limit\":5}}}");
+    assert(count_lines_with(r, "Title ") == 5);
+    assert(strstr(r, "Title 10") && strstr(r, "Title 14") && !strstr(r, "Title 15"));
+    assert(strstr(r, "offset=15"));
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":35,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{\"offset\":999}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "no titles at offset 999; 300 installed"));
+
+    // A large page is allowed (up to 1000) and returns everything.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":36,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"list_installed_titles\",\"arguments\":{\"limit\":1000}}}");
+    assert(count_lines_with(r, "Title ") == 300);
+    assert(!strstr(r, "showing"));
+    titles_stub_count = 0;
+    printf("list_installed_titles ok\n");
+}
+
 static Config g_cfg_for_oauth;
 
 int main(void) {
@@ -377,6 +439,7 @@ int main(void) {
     test_input_with_screenshot();
     test_create_token();
     test_power_tools();
+    test_list_titles();
     printf("all mcp tests passed\n");
     return 0;
 }

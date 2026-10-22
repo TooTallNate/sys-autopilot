@@ -51,3 +51,9 @@ size_t json_escape(const char *in, size_t inlen, char *out, size_t outsz);
 
 // Escaped length of in[0..inlen) without writing output.
 size_t json_escaped_len(const char *in, size_t inlen);
+
+// Drops a trailing incomplete UTF-8 sequence from NUL-terminated s (e.g. left
+// by a byte-bounded copy that split a multi-byte character), so a valid UTF-8
+// prefix stays valid. Complete sequences and other bytes are left untouched.
+// Returns the new length.
+size_t utf8_trim_partial(char *s);

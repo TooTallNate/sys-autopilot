@@ -220,3 +220,30 @@ size_t json_escape(const char *in, size_t inlen, char *out, size_t outsz) {
     out[o] = '\0';
     return o;
 }
+
+size_t utf8_trim_partial(char *s) {
+    size_t n = strlen(s);
+    // Walk back over up to 3 continuation bytes (10xxxxxx) to the lead byte.
+    size_t i = n, cont = 0;
+    while (i > 0 && cont < 3 && ((unsigned char)s[i - 1] & 0xC0) == 0x80) {
+        i--;
+        cont++;
+    }
+    if (i == 0)
+        return n;
+    unsigned char lead = (unsigned char)s[i - 1];
+    size_t need;
+    if ((lead & 0xE0) == 0xC0)
+        need = 2;
+    else if ((lead & 0xF0) == 0xE0)
+        need = 3;
+    else if ((lead & 0xF8) == 0xF0)
+        need = 4;
+    else
+        return n; // ASCII or not a lead byte: nothing partial to drop
+    if (cont + 1 < need) {
+        s[i - 1] = '\0';
+        return i - 1;
+    }
+    return n;
+}

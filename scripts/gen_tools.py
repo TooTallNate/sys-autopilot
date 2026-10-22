@@ -258,8 +258,14 @@ tools = [
         "description": ("List installed applications (titles) on the console. Returns one line "
                         "per title: 16-hex title id, content-meta version, storage "
                         "(sd/nand/gamecard), and display name. Useful for confirming an install "
-                        "or finding a title id. Lists base applications only (not updates or DLC)."),
-        "inputSchema": {"type": "object", "properties": {}},
+                        "or finding a title id. Lists base applications only (not updates or DLC). "
+                        "Paged: returns up to 'limit' titles (default 256) starting at 'offset'; "
+                        "when more remain, a final line says how many are installed and which "
+                        "offset to pass next."),
+        "inputSchema": {"type": "object", "properties": {
+            "offset": {"type": "integer", "description": "Index of the first title to return. Default 0."},
+            "limit": {"type": "integer", "description": "Maximum titles to return (1-1000). Default 256."},
+        }},
     },
     {
         "name": "get_dns",

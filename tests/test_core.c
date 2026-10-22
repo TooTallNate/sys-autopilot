@@ -282,12 +282,50 @@ static void test_sha256(void) {
     printf("sha256 ok\n");
 }
 
+// --- utf8_trim_partial ---------------------------------------------------------
+
+static void test_utf8_trim(void) {
+    struct { const char *in; const char *out; } cases[] = {
+        { "", "" },
+        { "Zelda", "Zelda" },
+        { "Pok\xC3\xA9mon", "Pok\xC3\xA9mon" },           // complete 2-byte
+        { "Pok\xC3", "Pok" },                             // cut 2-byte
+        { "\xE3\x83\x9E\xE3\x83\xAA", "\xE3\x83\x9E\xE3\x83\xAA" }, // complete 3-byte
+        { "\xE3\x83\x9E\xE3\x83", "\xE3\x83\x9E" },       // cut 3-byte after 2
+        { "\xE3\x83\x9E\xE3", "\xE3\x83\x9E" },           // cut 3-byte after 1
+        { "ok\xF0\x9F\x8E\xAE", "ok\xF0\x9F\x8E\xAE" },   // complete 4-byte
+        { "ok\xF0\x9F\x8E", "ok" },                       // cut 4-byte after 3
+        { "ok\xF0", "ok" },                               // cut 4-byte after 1
+        { "\xC3", "" },                                   // lone lead
+        { "a\x80\x80\x80\x80", "a\x80\x80\x80\x80" },     // invalid run: untouched
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%s", cases[i].in);
+        size_t n = utf8_trim_partial(buf);
+        assert(strcmp(buf, cases[i].out) == 0);
+        assert(n == strlen(cases[i].out));
+    }
+
+    // The real case: a byte-bounded copy of a long Japanese name (3-byte
+    // chars) into an 80-byte buffer leaves 79 bytes = 26 chars + 1 stray byte.
+    char longname[128] = "";
+    for (int i = 0; i < 40; i++)
+        strcat(longname, "\xE3\x81\x82"); // HIRAGANA A
+    char name[80];
+    snprintf(name, sizeof(name), "%.*s", (int)sizeof(name) - 1, longname);
+    assert(strlen(name) == 79);
+    assert(utf8_trim_partial(name) == 78);
+    printf("utf8_trim_partial ok\n");
+}
+
 int main(void) {
     test_base64();
     test_json();
     test_jstream();
     test_buttons();
     test_sha256();
+    test_utf8_trim();
     printf("all core tests passed\n");
     return 0;
 }

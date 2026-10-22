@@ -345,19 +345,33 @@ List the applications installed on the console (base titles only — not updates
 or DLC), across the SD card, internal storage, and an inserted gamecard.
 
 ```
-GET /titles
+GET /titles                       every installed title
+GET /titles?offset=100&limit=50   a window: 50 titles from index 100
 ```
 
 ```json
 {"titles":[
   {"titleId":"0100000000010000","version":0,"storage":"sd","name":"Some Game"},
   {"titleId":"0100000000020000","version":0,"storage":"nand","name":"Another Game"}
-]}
+],"total":2,"offset":0}
 ```
 
-`name` is the title's display name (from its control data); it may be empty if
-the control data isn't available. `storage` is `sd`, `nand`, or `gamecard`.
-Also exposed as the `list_installed_titles` MCP tool.
+With no parameters the response contains every installed title (there is no
+fixed cap). `offset` (default 0) and `limit` (default: no limit) are optional,
+non-negative integers for fetching a window; `total` is always the full number
+of installed titles, so a client can page until `offset + titles.length >=
+total`. An `offset` past the end returns an empty `titles` array; a malformed
+value returns 400. Order is stable between calls (SD card, then internal
+storage, then gamecard) as long as nothing is installed or removed meanwhile.
+
+`name` is the title's display name (from its control data, cut to 79 bytes on a
+character boundary so it is always valid UTF-8); it may be empty if the control
+data isn't available. `storage` is `sd`, `nand`, or `gamecard`.
+
+Also exposed as the `list_installed_titles` MCP tool, which is paged to keep
+model context small: it returns up to `limit` titles (default 256, max 1000)
+starting at `offset`, and when more remain it ends with a line such as
+`(showing 1-256 of 812 installed titles; call again with offset=256 for more)`.
 
 ### Network DNS
 

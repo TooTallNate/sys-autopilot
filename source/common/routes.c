@@ -380,29 +380,93 @@ static const char *storage_label(uint8_t storage_id) {
     }
 }
 
+// Heap-grown JSON body for /titles (the list has no fixed upper bound).
+typedef struct {
+    char  *buf;
+    size_t len, cap;
+    int    count;
+} TitlesJson;
+
+static bool titles_json_append(TitlesJson *j, const char *s, size_t n) {
+    if (j->len + n + 1 > j->cap) {
+        size_t newcap = j->cap ? j->cap : 4096;
+        while (j->len + n + 1 > newcap)
+            newcap *= 2;
+        char *nb = realloc(j->buf, newcap);
+        if (!nb)
+            return false;
+        j->buf = nb;
+        j->cap = newcap;
+    }
+    memcpy(j->buf + j->len, s, n);
+    j->len += n;
+    j->buf[j->len] = '\0';
+    return true;
+}
+
+static bool titles_json_visit(const TitleInfo *t, void *ctx) {
+    TitlesJson *j = ctx;
+    char name[sizeof(t->name) * 6 + 1]; // worst case: every byte -> \u00XX
+    json_escape(t->name, strlen(t->name), name, sizeof(name));
+    char entry[sizeof(name) + 128];
+    int n = snprintf(entry, sizeof(entry),
+        "%s{\"titleId\":\"%016llx\",\"version\":%u,\"storage\":\"%s\",\"name\":\"%s\"}",
+        j->count ? "," : "", (unsigned long long)t->title_id,
+        t->version, storage_label(t->storage_id), name);
+    if (n < 0 || (size_t)n >= sizeof(entry))
+        return false;
+    j->count++;
+    return titles_json_append(j, entry, (size_t)n);
+}
+
+// Parses an optional non-negative integer query parameter. Returns false (and
+// sends a 400) when it's present but malformed.
+static bool query_nonneg_int(HttpRequest *req, const char *key, int *out) {
+    char val[16];
+    if (!http_query_get(req, key, val, sizeof(val)) || !val[0])
+        return true;
+    char *end;
+    long v = strtol(val, &end, 10);
+    if (*end || v < 0 || v > 0x7fffffffL) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "'%s' must be a non-negative integer", key);
+        http_send_error(req->fd, 400, msg);
+        return false;
+    }
+    *out = (int)v;
+    return true;
+}
+
+// GET /titles[?offset=N][&limit=M]. Returns every installed title by default;
+// offset/limit select a window. "total" is always the full installed count.
 static void handle_titles(HttpRequest *req) {
-    static TitleInfo titles[TITLES_MAX];
-    int count = 0;
+    int offset = 0, limit = -1;
+    if (!query_nonneg_int(req, "offset", &offset) ||
+        !query_nonneg_int(req, "limit", &limit))
+        return;
+
+    TitlesJson j = {0};
     char err[128] = {0};
-    if (!titles_list(titles, TITLES_MAX, &count, err, sizeof(err))) {
-        http_send_error(req->fd, 500, err[0] ? err : "failed to list titles");
+    int total = 0;
+    if (!titles_json_append(&j, "{\"titles\":[", 11)) {
+        http_send_error(req->fd, 500, "out of memory");
         return;
     }
-
-    // Build the JSON into a static buffer (the list can be large). Each entry is
-    // well under 256 bytes; TITLES_MAX entries fit comfortably.
-    static char body[TITLES_MAX * 256 + 32];
-    size_t pos = (size_t)snprintf(body, sizeof(body), "{\"titles\":[");
-    for (int i = 0; i < count && pos < sizeof(body) - 256; i++) {
-        char name[160];
-        json_escape(titles[i].name, strlen(titles[i].name), name, sizeof(name));
-        pos += (size_t)snprintf(body + pos, sizeof(body) - pos,
-            "%s{\"titleId\":\"%016llx\",\"version\":%u,\"storage\":\"%s\",\"name\":\"%s\"}",
-            i ? "," : "", (unsigned long long)titles[i].title_id,
-            titles[i].version, storage_label(titles[i].storage_id), name);
+    if (!titles_foreach(offset, limit, titles_json_visit, &j, &total,
+                        err, sizeof(err))) {
+        free(j.buf);
+        http_send_error(req->fd, 500, err[0] ? err : "out of memory listing titles");
+        return;
     }
-    pos += (size_t)snprintf(body + pos, sizeof(body) - pos, "]}");
-    http_send_response(req->fd, 200, "application/json", body, pos);
+    char tail[64];
+    int tn = snprintf(tail, sizeof(tail), "],\"total\":%d,\"offset\":%d}", total, offset);
+    if (!titles_json_append(&j, tail, (size_t)tn)) {
+        free(j.buf);
+        http_send_error(req->fd, 500, "out of memory");
+        return;
+    }
+    http_send_response(req->fd, 200, "application/json", j.buf, j.len);
+    free(j.buf);
 }
 
 // --- /network/dns ------------------------------------------------------------
