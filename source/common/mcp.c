@@ -759,6 +759,27 @@ static void tool_list_titles(HttpRequest *req, const char *id) {
     send_tool_ok(req->fd, id, text);
 }
 
+static void tool_uninstall_title(HttpRequest *req, const char *id,
+                                 const JsonDoc *doc, int args) {
+    char val[32] = {0};
+    uint64_t title_id;
+    int t = json_obj_get(doc, args, "titleId");
+    if (t < 0 || !json_get_string(doc, t, val, sizeof(val)) ||
+        !titles_parse_id(val, &title_id)) {
+        send_tool_error(req->fd, id, "missing or invalid 'titleId' (16 hex digits)");
+        return;
+    }
+    char err[128] = {0};
+    if (!titles_uninstall(title_id, err, sizeof(err))) {
+        send_tool_error(req->fd, id, err[0] ? err : "failed to uninstall title");
+        return;
+    }
+    char msg[96];
+    snprintf(msg, sizeof(msg), "uninstalled %016llx (save data kept)",
+             (unsigned long long)title_id);
+    send_tool_ok(req->fd, id, msg);
+}
+
 static void tool_get_dns(HttpRequest *req, const char *id) {
     DnsConfig c;
     char err[96];
@@ -966,6 +987,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
         tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
     else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
     else if (strcmp(name, "list_installed_titles") == 0) tool_list_titles(req, id);
+    else if (strcmp(name, "uninstall_title") == 0)  tool_uninstall_title(req, id, doc, args);
     else if (strcmp(name, "get_dns") == 0)          tool_get_dns(req, id);
     else if (strcmp(name, "set_dns") == 0)          tool_set_dns(req, id, doc, args);
     else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);

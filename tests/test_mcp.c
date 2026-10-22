@@ -359,6 +359,37 @@ static void test_power_tools(void) {
     printf("power tools ok\n");
 }
 
+static void test_uninstall_title(void) {
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"tools/list\"}");
+    assert(strstr(r, "\"uninstall_title\""));
+
+    // Host stub succeeds; the tool echoes the normalized title id.
+    r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"tools/call\","
+               "\"params\":{\"name\":\"uninstall_title\","
+               "\"arguments\":{\"titleId\":\"0x01000000000100AB\"}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "uninstalled 01000000000100ab"));
+
+    // Missing, short, non-hex, and zero ids are rejected before reaching ns.
+    static const char *bad[] = {
+        "{}",
+        "{\"titleId\":\"0100\"}",
+        "{\"titleId\":\"010000000001000G\"}",
+        "{\"titleId\":\"01000000000100000\"}",
+        "{\"titleId\":\"0000000000000000\"}",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        char body[256];
+        snprintf(body, sizeof(body),
+                 "{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"tools/call\","
+                 "\"params\":{\"name\":\"uninstall_title\",\"arguments\":%s}}", bad[i]);
+        r = do_rpc(body);
+        assert(strstr(r, "\"isError\":true"));
+        assert(strstr(r, "titleId"));
+    }
+    printf("uninstall_title ok\n");
+}
+
 static Config g_cfg_for_oauth;
 
 int main(void) {
@@ -377,6 +408,7 @@ int main(void) {
     test_input_with_screenshot();
     test_create_token();
     test_power_tools();
+    test_uninstall_title();
     printf("all mcp tests passed\n");
     return 0;
 }

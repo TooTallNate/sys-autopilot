@@ -262,6 +262,18 @@ tools = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "uninstall_title",
+        "description": ("Uninstall an application (game) from the console. WARNING: this "
+                        "PERMANENTLY deletes the game - its base title, updates, and DLC on every "
+                        "storage - and removes it from the HOME menu; it cannot be undone "
+                        "except by reinstalling. Save data is kept. Get the title id from "
+                        "list_installed_titles. Only use when explicitly asked to."),
+        "inputSchema": {"type": "object", "properties": {
+            "titleId": {"type": "string",
+                        "description": "16-hex-digit application (base) title id, e.g. 0100000000010000."},
+        }, "required": ["titleId"]},
+    },
+    {
         "name": "get_dns",
         "description": ("Get the console's current DNS configuration for the active network "
                         "connection: whether it's automatic (DHCP) or manual, and the primary/"

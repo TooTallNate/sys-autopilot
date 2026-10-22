@@ -405,6 +405,25 @@ static void handle_titles(HttpRequest *req) {
     http_send_response(req->fd, 200, "application/json", body, pos);
 }
 
+// DELETE /titles?id=<16-hex title id> — uninstall an application (save data
+// is kept).
+static void handle_titles_delete(HttpRequest *req) {
+    char val[32];
+    uint64_t title_id;
+    if (!http_query_get(req, "id", val, sizeof(val)) ||
+        !titles_parse_id(val, &title_id)) {
+        http_send_error(req->fd, 400, "missing or invalid 'id' (16 hex digits)");
+        return;
+    }
+    char err[128] = {0};
+    if (!titles_uninstall(title_id, err, sizeof(err))) {
+        http_send_error(req->fd, 500, err[0] ? err : "failed to uninstall title");
+        return;
+    }
+    http_send_json(req->fd, 200, "{\"ok\":true,\"titleId\":\"%016llx\"}",
+                   (unsigned long long)title_id);
+}
+
 // --- /network/dns ------------------------------------------------------------
 
 static void handle_dns_get(HttpRequest *req) {
@@ -544,6 +563,7 @@ static const Route kRoutes[] = {
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
     { "GET",    "/titles",            handle_titles },
+    { "DELETE", "/titles",            handle_titles_delete },
     { "GET",    "/network/dns",       handle_dns_get },
     { "POST",   "/network/dns",       handle_dns_set },
     { "POST",   "/install",           handle_install },
