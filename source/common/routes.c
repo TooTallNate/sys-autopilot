@@ -4,6 +4,7 @@
 #include "input.h"
 #include "install.h"
 #include "titles.h"
+#include "saves.h"
 #include "network.h"
 #include "json.h"
 #include "mcp.h"
@@ -544,6 +545,11 @@ static const Route kRoutes[] = {
     { "PUT",    "/files",             files_handle_put },
     { "DELETE", "/files",             files_handle_delete },
     { "GET",    "/titles",            handle_titles },
+    { "GET",    "/saves",             saves_handle_list },
+    { "GET",    "/saves/files",       saves_handle_files },
+    { "GET",    "/saves/export",      saves_handle_export },
+    { "GET",    "/saves/raw",         saves_handle_raw },
+    { "PUT",    "/saves/import",      saves_handle_import },
     { "GET",    "/network/dns",       handle_dns_get },
     { "POST",   "/network/dns",       handle_dns_set },
     { "POST",   "/install",           handle_install },

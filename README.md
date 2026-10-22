@@ -202,6 +202,7 @@ Details:
 | `get_nickname` / `set_nickname` | Read / set the console's device nickname |
 | `get_brightness` / `set_brightness` | Read / set screen brightness (`0.0`–`1.0`) |
 | `get_volume` / `set_volume` | Read / set master volume (`0.0`–`1.0`) |
+| `list_saves` | List game saves (save id, type, title id, user id, size); back them up / restore them with `GET /saves/export` / `PUT /saves/import` |
 | `airplane_mode` | Enable airplane mode (disable wireless). **One-way: cuts the server off; cannot be undone remotely** |
 
 Button names: `A B X Y L R ZL ZR PLUS MINUS UP DOWN LEFT RIGHT LSTICK RSTICK
@@ -359,6 +360,74 @@ GET /titles
 the control data isn't available. `storage` is `sd`, `nand`, or `gamecard`.
 Also exposed as the `list_installed_titles` MCP tool.
 
+### Save data
+
+Back up and restore game saves (the NAND user save space) without a homebrew
+app on screen. System saves (other system modules' state) are never listed or
+touched.
+
+```
+GET /saves                                         list game saves (JSON)
+GET /saves/files?id=<saveId>[&path=/dir/file]      browse a save: directory listing (JSON) or file bytes
+GET /saves/export?id=<saveId>                      the whole save as a tar archive
+GET /saves/raw?id=<saveId>                         the raw on-NAND save container
+PUT /saves/import?id=<saveId>                      replace a save's contents with a tar from /saves/export
+```
+
+```json
+{"saves":[
+  {"id":"0000000000000012","type":"account","titleId":"0100000000010000",
+   "uid":"1001b2c3d4e5f60718293a4b5c6d7e8f","index":0,"size":34603008},
+  {"id":"0000000000000013","type":"device","titleId":"0100000000020000",
+   "uid":"00000000000000000000000000000000","index":0,"size":1048576}
+]}
+```
+
+`type` is `account` (per-user), `device` (shared by all users), `bcat`, or
+`cache`; `size` is the size of the save image on NAND. `uid` is the user
+account id as 32 hex chars: the two 64-bit halves of the `AccountUid`
+(`uid[0]` then `uid[1]`), each written as a 16-digit hex number. It is all
+zeros for saves that don't belong to a user. Also exposed as the `list_saves`
+MCP tool.
+
+Every endpoint except `GET /saves` selects a save either by `id` (from the
+list) or by `titleId` (+ `uid` when several users have a save for that game):
+
+```sh
+curl -o game.tar "http://<ip>:4150/saves/export?titleId=0100000000010000&uid=1001b2c3d4e5f60718293a4b5c6d7e8f"
+curl "http://<ip>:4150/saves/files?id=0000000000000012&path=/"
+# restore it (to the same user here, or to another user / console):
+curl -T game.tar "http://<ip>:4150/saves/import?titleId=0100000000010000&uid=1001b2c3d4e5f60718293a4b5c6d7e8f"
+# -> {"ok":true,"saveId":"0000000000000012","titleId":"0100000000010000","uid":"1001b2c3...","files":1,"bytes":4096,"atomic":true}
+```
+
+- **An open save is locked.** A running game holds its own save, and FS keeps
+  the most recently mounted save open after it is closed. Requests on a locked
+  save return HTTP 409 (`rc` `0xe02`); close the game, or access any other save
+  first to evict it from the cache, then retry.
+- **Export** is a plain ustar archive of the save's files (`tar -tvf` it), the
+  same file tree tools like JKSV produce. It is streamed (the save is walked
+  twice: once to compute `Content-Length`, once to send), so save size is not
+  limited by the sysmodule's memory. If a file can't be read part-way, the
+  connection is closed short of `Content-Length` rather than sending a corrupt
+  archive.
+- **Raw** returns the save container itself (`/save/<id>` read through the BIS
+  user partition, so the BIS encryption is already removed: DISF header,
+  journal and hash trees). Extract it offline with `hactool -t save`. It is
+  subject to the same lock: while the save is open (see above) it returns 409.
+- **Import** is destructive: the save's current contents are deleted and
+  replaced by the archive. The target save must already exist (launch the game
+  once on that user to create it). It needs `Content-Length` (`curl -T` sends
+  it). Accepted archives: ustar / GNU tar (pax headers, links and devices are
+  skipped; GNU long names and `..` paths are rejected). The save filesystem is
+  journaled: when the archive fits the save's journal (the usual case),
+  everything is committed once at the end, so any failure (bad archive,
+  dropped connection, save full) leaves the save exactly as it was
+  (`"saveUnchanged":true` in the error). Restores bigger than the journal have
+  to commit as they go; the success response then says `"atomic":false`, and
+  a failure part-way may leave the save partially restored
+  (`"saveUnchanged":false`), so import the backup again.
+
 ### Network DNS
 
 Read or change the DNS servers for the active network connection. Useful for
@@ -466,6 +535,8 @@ source/common/         shared server core
   screen.c             caps:sc JPEG capture
   input.c              HDLS virtual Pro Controller
   files.c              SD card file/directory endpoints + helpers
+  saves.c              game save data: list/browse/export/raw/import
+  ustar.c              tar header build/parse + entry path checks (host-testable)
   settings.c           system settings (theme/nickname/brightness/volume/battery)
   install.c            streamed NSP installer (PFS0 parse + NCM + content-meta)
   nx_ext.c             ns/es IPC wrappers libnx doesn't expose (record/ticket)

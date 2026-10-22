@@ -281,6 +281,15 @@ tools = [
         }},
     },
     {
+        "name": "list_saves",
+        "description": ("List the game save data on the console (read-only). Returns one line "
+                        "per save: 16-hex save id, type (account/device/bcat/cache), owning "
+                        "title id, user id (32 hex, '-' for saves not tied to a user), and size "
+                        "on NAND. Back up or restore a save with the HTTP endpoints "
+                        "GET /saves/export and PUT /saves/import using that id."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "get_auto_time",
         "description": ("Get whether the clock is automatically synchronized over the internet. "
                         "Returns \"enabled\" or \"disabled\"."),

@@ -12,6 +12,7 @@
 #include "screen.h"
 #include "settings.h"
 #include "titles.h"
+#include "saves.h"
 #include "network.h"
 #include "log.h"
 #include "mcp_tools.h"
@@ -805,6 +806,40 @@ static void tool_set_dns(HttpRequest *req, const char *id,
     send_tool_ok(req->fd, id, text);
 }
 
+static void tool_list_saves(HttpRequest *req, const char *id) {
+    SaveEntry *v = NULL;
+    int count = 0;
+    char err[96] = {0};
+    if (!saves_list(&v, &count, err, sizeof(err))) {
+        send_tool_error(req->fd, id, err[0] ? err : "failed to list saves");
+        return;
+    }
+    size_t cap = (size_t)count * 128 + 64;
+    char *text = malloc(cap);
+    if (!text) {
+        free(v);
+        send_tool_error(req->fd, id, "out of memory");
+        return;
+    }
+    size_t pos = 0;
+    text[0] = '\0';
+    if (count == 0)
+        pos += (size_t)snprintf(text, cap, "(no game saves)");
+    for (int i = 0; i < count && pos < cap - 128; i++) {
+        char uid[33];
+        saves_format_uid(v[i].uid, uid);
+        bool per_user = v[i].uid[0] || v[i].uid[1];
+        pos += (size_t)snprintf(text + pos, cap - pos,
+            "%s%016llx  %-9s  title %016llx  uid %s  %llu bytes", i ? "\n" : "",
+            (unsigned long long)v[i].save_id, saves_type_name(v[i].type),
+            (unsigned long long)v[i].title_id, per_user ? uid : "-",
+            (unsigned long long)v[i].size);
+    }
+    free(v);
+    send_tool_ok(req->fd, id, text);
+    free(text);
+}
+
 static void tool_get_auto_time(HttpRequest *req, const char *id) {
     bool en = false;
     if (!settings_get_auto_time(&en))
@@ -966,6 +1001,7 @@ static void handle_tools_call(HttpRequest *req, const char *id, const JsonDoc *d
         tool_set_float(req, id, doc, args, "volume", "volume", settings_set_volume);
     else if (strcmp(name, "airplane_mode") == 0)    tool_airplane_mode(req, id);
     else if (strcmp(name, "list_installed_titles") == 0) tool_list_titles(req, id);
+    else if (strcmp(name, "list_saves") == 0)       tool_list_saves(req, id);
     else if (strcmp(name, "get_dns") == 0)          tool_get_dns(req, id);
     else if (strcmp(name, "set_dns") == 0)          tool_set_dns(req, id, doc, args);
     else if (strcmp(name, "get_auto_time") == 0)    tool_get_auto_time(req, id);
