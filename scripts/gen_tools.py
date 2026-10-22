@@ -94,8 +94,9 @@ tools = [
     },
     {
         "name": "status",
-        "description": ("Get server status: version, console firmware, virtual controller state, "
-                        "uptime, and battery percentage / charging state."),
+        "description": ("Get server status: version, console firmware, Atmosphere version, "
+                        "virtual controller state, uptime, battery percentage / charging state, "
+                        "connected Wi-Fi SSID, and SD card free/total bytes."),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {

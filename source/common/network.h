@@ -26,3 +26,10 @@ bool network_get_dns(DnsConfig *out, char *err, size_t errsz);
 // true on success.
 bool network_set_dns(bool automatic, const char *primary, const char *secondary,
                      char *err, size_t errsz);
+
+// Writes the SSID of the Wi-Fi network the console is currently connected to
+// into out (NUL-terminated; SSIDs are at most 32 bytes, so outsz >= 33 holds
+// any SSID). Returns false when there is no current connection or it is not
+// wireless (e.g. Ethernet), in which case out is set to "". Read-only; works
+// with nifm:u. (Host build: a stub that reports "test-ssid".)
+bool network_get_ssid(char *out, size_t outsz);

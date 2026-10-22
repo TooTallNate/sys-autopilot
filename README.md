@@ -192,7 +192,7 @@ Details:
 | `hold_buttons` / `release_buttons` | Persistent button state |
 | `set_stick` | Analog stick (`side`, `x`/`y` in -1..1, optional `durationMs`) |
 | `clear_input` | Release everything, recenter sticks |
-| `status` | Server version, firmware, controller state, uptime, battery % / charging |
+| `status` | Server version, firmware, Atmosphère version, controller state, uptime, battery % / charging, Wi-Fi SSID, SD free/total |
 | `list_directory` | JSON listing of an SD card directory |
 | `read_file` | Read text files (32 KB pages, negative `offset` = tail) — ideal for logs |
 | `upload_file` | Write a file (base64 `content`, **streamed to SD — no size cap**) |
@@ -393,10 +393,15 @@ GET /status
 ```
 
 ```json
-{"version":"1.1.0","firmware":"19.0.1","controllerAttached":true,"uptimeSeconds":4242,"batteryPercent":87,"charging":true}
+{"version":"1.1.0","firmware":"19.0.1","atmosphere":"1.9.4","controllerAttached":true,"uptimeSeconds":4242,"batteryPercent":87,"charging":true,"ssid":"HomeNetwork","sdFreeBytes":51234567168,"sdTotalBytes":127817449472}
 ```
 
-`batteryPercent`/`charging` are included when the battery service is available.
+| Field | Type | Notes |
+|---|---|---|
+| `atmosphere` | string | Atmosphère version (from Exosphère). Omitted when it can't be determined. |
+| `batteryPercent` / `charging` | number / boolean | Included when the battery service is available. |
+| `ssid` | string \| null | SSID of the connected Wi-Fi network; `null` while disconnected, in airplane mode, or on a wired connection. |
+| `sdFreeBytes` / `sdTotalBytes` | number | SD card free / total capacity in bytes. Omitted if the query fails. |
 
 ### System settings
 

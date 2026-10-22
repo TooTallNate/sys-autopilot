@@ -338,6 +338,24 @@ static void test_create_token(void) {
     printf("revoke_token ok\n");
 }
 
+static void test_status(void) {
+    system("mkdir -p " FAKE_SD); // files_sd_space() statvfs()es FILES_ROOT
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"status\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\"") == NULL || strstr(r, "\"isError\":false"));
+    assert(strstr(r, "version: test"));
+    assert(strstr(r, "firmware: 19.0.1"));
+    assert(strstr(r, "uptimeSeconds: 42"));
+    assert(strstr(r, "batteryPercent: 75"));
+    assert(strstr(r, "ssid: test-ssid"));
+    assert(strstr(r, "sdFreeBytes: "));
+    assert(strstr(r, "sdTotalBytes: "));
+    // Host device_info reports no Atmosphère version, so the line is omitted
+    // rather than printed empty.
+    assert(strstr(r, "atmosphere:") == NULL);
+    printf("status ok\n");
+}
+
 static void test_power_tools(void) {
     // Tool responds ok and schedules the action for after the response.
     const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\","
@@ -377,6 +395,7 @@ int main(void) {
     test_input_with_screenshot();
     test_create_token();
     test_power_tools();
+    test_status();
     printf("all mcp tests passed\n");
     return 0;
 }

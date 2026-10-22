@@ -36,3 +36,9 @@ bool files_delete_path(const char *fspath, const char **err);
 // *out_size, and returns true. On failure returns false with *err set.
 bool files_hash_sha256(const char *fspath, char out_hex[65], long long *out_size,
                        const char **err);
+
+// Reports the SD card's free and total capacity in bytes. Returns false if the
+// filesystem query fails. On the Switch this asks the mounted sdmc filesystem
+// directly (fsFsGetFreeSpace/fsFsGetTotalSpace); host builds use statvfs() on
+// FILES_ROOT so the callers can be exercised in tests.
+bool files_sd_space(long long *out_free, long long *out_total);

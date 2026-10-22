@@ -12,6 +12,7 @@
 #include "screen.h"
 #include "settings.h"
 #include "log.h"
+#include "device_info.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -151,31 +152,47 @@ static void handle_input_stick(HttpRequest *req) {
 
 static void handle_status(HttpRequest *req) {
     u32 ver = hosversionGet();
+
+    // Optional fields are appended only when the underlying service answers.
+    char ams[48] = "";
+    const char *ams_ver = device_info_get()->atmosphere;
+    if (ams_ver[0] != '\0')
+        snprintf(ams, sizeof(ams), ",\"atmosphere\":\"%s\"", ams_ver);
+
+    char batt[64] = "";
     uint32_t pct = 0;
     bool charging = false;
-    bool have_batt = settings_get_battery(&pct, &charging);
-    if (have_batt) {
-        http_send_json(req->fd, 200,
-                       "{\"version\":\"" APP_VERSION "\","
-                       "\"firmware\":\"%u.%u.%u\","
-                       "\"controllerAttached\":%s,"
-                       "\"uptimeSeconds\":%llu,"
-                       "\"batteryPercent\":%u,"
-                       "\"charging\":%s}",
-                       HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
-                       input_is_attached() ? "true" : "false",
-                       (unsigned long long)routes_uptime_seconds(),
-                       pct, charging ? "true" : "false");
-    } else {
-        http_send_json(req->fd, 200,
-                       "{\"version\":\"" APP_VERSION "\","
-                       "\"firmware\":\"%u.%u.%u\","
-                       "\"controllerAttached\":%s,"
-                       "\"uptimeSeconds\":%llu}",
-                       HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
-                       input_is_attached() ? "true" : "false",
-                       (unsigned long long)routes_uptime_seconds());
+    if (settings_get_battery(&pct, &charging))
+        snprintf(batt, sizeof(batt), ",\"batteryPercent\":%u,\"charging\":%s",
+                 pct, charging ? "true" : "false");
+
+    // null while not connected to Wi-Fi (disconnected, airplane mode, wired).
+    char ssid[33], ssid_json[6 * 32 + 3] = "null";
+    if (network_get_ssid(ssid, sizeof(ssid))) {
+        ssid_json[0] = '"';
+        size_t n = json_escape(ssid, strlen(ssid), ssid_json + 1, sizeof(ssid_json) - 2);
+        if (n == (size_t)-1)
+            snprintf(ssid_json, sizeof(ssid_json), "null");
+        else
+            snprintf(ssid_json + 1 + n, sizeof(ssid_json) - 1 - n, "\"");
     }
+
+    char sd[96] = "";
+    long long sd_free = 0, sd_total = 0;
+    if (files_sd_space(&sd_free, &sd_total))
+        snprintf(sd, sizeof(sd), ",\"sdFreeBytes\":%lld,\"sdTotalBytes\":%lld",
+                 sd_free, sd_total);
+
+    http_send_json(req->fd, 200,
+                   "{\"version\":\"" APP_VERSION "\","
+                   "\"firmware\":\"%u.%u.%u\"%s,"
+                   "\"controllerAttached\":%s,"
+                   "\"uptimeSeconds\":%llu%s,"
+                   "\"ssid\":%s%s}",
+                   HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver), ams,
+                   input_is_attached() ? "true" : "false",
+                   (unsigned long long)routes_uptime_seconds(), batt,
+                   ssid_json, sd);
 }
 
 // --- /settings/* --------------------------------------------------------------
