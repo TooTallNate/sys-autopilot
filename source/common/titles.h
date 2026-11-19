@@ -6,8 +6,8 @@
 
 // Enumerate installed applications (titles) from NCM content-meta databases,
 // resolving display names from each title's control data (NACP) via ns.
-// Read-only — no NPDM changes beyond the ncm/ns access the installer already
-// declares.
+// Also uninstalls applications via ns. No NPDM changes beyond the ncm/ns access
+// the installer already declares.
 
 #define TITLES_MAX 256
 
@@ -24,3 +24,13 @@ typedef struct {
 // to err. (Host build: a stub that returns an empty list.)
 bool titles_list(TitleInfo *titles, int max, int *out_count,
                  char *err, size_t errsz);
+
+// Parses a title id as printed by GET /titles: exactly 16 hex digits (an
+// optional "0x" prefix is accepted). Returns false if malformed or zero.
+bool titles_parse_id(const char *s, uint64_t *out);
+
+// Permanently uninstalls an application: its base game, updates, and DLC on
+// every storage, plus its application record (removed from the HOME menu).
+// Save data is kept. On failure writes a short message to err and returns
+// false. (Host build: a stub that succeeds without doing anything.)
+bool titles_uninstall(uint64_t title_id, char *err, size_t errsz);
