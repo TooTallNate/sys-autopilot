@@ -101,6 +101,26 @@ bool network_set_dns(bool automatic, const char *primary, const char *secondary,
     return true;
 }
 
+bool network_get_ssid(char *out, size_t outsz) {
+    if (outsz == 0) return false;
+    out[0] = '\0';
+    // Fails (no current profile) while disconnected / in airplane mode. For
+    // a wired connection the wireless block is empty (ssid_len == 0).
+    NifmNetworkProfileData prof;
+    if (R_FAILED(nifmGetCurrentNetworkProfile(&prof)))
+        return false;
+    size_t n = prof.wireless_setting_data.ssid_len;
+    if (n > sizeof(prof.wireless_setting_data.ssid) - 1) // 32-byte max + NUL
+        n = sizeof(prof.wireless_setting_data.ssid) - 1;
+    if (n > outsz - 1)
+        n = outsz - 1;
+    if (n == 0)
+        return false;
+    memcpy(out, prof.wireless_setting_data.ssid, n);
+    out[n] = '\0';
+    return true;
+}
+
 #else // !__SWITCH__ : host stubs so the REST/MCP layer links in tests.
 
 #include <string.h>
@@ -117,6 +137,11 @@ bool network_set_dns(bool automatic, const char *primary, const char *secondary,
     (void)automatic; (void)primary; (void)secondary;
     snprintf(err, errsz, "network config unavailable on host");
     return false;
+}
+
+bool network_get_ssid(char *out, size_t outsz) {
+    snprintf(out, outsz, "test-ssid");
+    return true;
 }
 
 #endif // __SWITCH__

@@ -65,10 +65,18 @@ void device_info_init(void) {
     }
 
     // Atmosphère version via the SPL service (requires spl: in the NPDM).
-    // Only meaningful when running under Atmosphère; best-effort otherwise.
-    if (hosversionIsAtmosphere() && R_SUCCEEDED(splInitialize())) {
+    //
+    // Deliberately NOT gated on hosversionIsAtmosphere(): libnx only sets that
+    // flag from the homebrew loader's HosVersion config entry (i.e. for NROs
+    // launched via hbloader). A sysmodule has no loader config and sets the
+    // version itself in __appInit, so the flag is always false here and the
+    // query never ran. Instead just ask: Exosphère answers this config item,
+    // while stock secure monitor firmware rejects it, so a failed call (or a
+    // zero value) simply means "not Atmosphère / unknown".
+    if (R_SUCCEEDED(splInitialize())) {
         u64 packed = 0;
-        if (R_SUCCEEDED(splGetConfig((SplConfigItem)EXOSPHERE_API_VERSION, &packed))) {
+        if (R_SUCCEEDED(splGetConfig((SplConfigItem)EXOSPHERE_API_VERSION, &packed)) &&
+            packed != 0) {
             u8 major = (packed >> 56) & 0xFF;
             u8 minor = (packed >> 48) & 0xFF;
             u8 micro = (packed >> 40) & 0xFF;

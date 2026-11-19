@@ -2,6 +2,7 @@
 #include "apiargs.h"
 #include "base64.h"
 #include "config.h"
+#include "device_info.h"
 #include "files.h"
 #include "input.h"
 #include "json.h"
@@ -18,6 +19,7 @@
 
 #include <strings.h>
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -362,21 +364,47 @@ static void tool_set_stick(HttpRequest *req, const char *id, const JsonDoc *doc,
                                      "ok", doc, args);
 }
 
+// Appends printf-style text at *len, clamping on truncation (never overflows).
+__attribute__((format(printf, 4, 5)))
+static void text_appendf(char *buf, size_t cap, size_t *len, const char *fmt, ...) {
+    if (*len >= cap - 1)
+        return;
+    va_list ap;
+    va_start(ap, fmt);
+    int w = vsnprintf(buf + *len, cap - *len, fmt, ap);
+    va_end(ap);
+    if (w > 0)
+        *len += ((size_t)w < cap - *len) ? (size_t)w : cap - *len - 1;
+}
+
 static void tool_status(HttpRequest *req, const char *id) {
     u32 ver = hosversionGet();
-    char text[256];
-    int n = snprintf(text, sizeof(text),
-             "version: %s\nfirmware: %u.%u.%u\ncontrollerAttached: %s\nuptimeSeconds: %llu",
-             routes_app_version(),
-             HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver),
-             input_is_attached() ? "true" : "false",
-             (unsigned long long)routes_uptime_seconds());
+    char text[512];
+    size_t len = 0;
+    text[0] = '\0';
+    text_appendf(text, sizeof(text), &len, "version: %s\nfirmware: %u.%u.%u",
+                 routes_app_version(),
+                 HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver));
+    const char *ams = device_info_get()->atmosphere;
+    if (ams[0] != '\0')
+        text_appendf(text, sizeof(text), &len, "\natmosphere: %s", ams);
+    text_appendf(text, sizeof(text), &len, "\ncontrollerAttached: %s\nuptimeSeconds: %llu",
+                 input_is_attached() ? "true" : "false",
+                 (unsigned long long)routes_uptime_seconds());
     uint32_t pct = 0;
     bool charging = false;
-    if (n > 0 && (size_t)n < sizeof(text) && settings_get_battery(&pct, &charging))
-        snprintf(text + n, sizeof(text) - (size_t)n,
-                 "\nbatteryPercent: %u\ncharging: %s",
-                 pct, charging ? "true" : "false");
+    if (settings_get_battery(&pct, &charging))
+        text_appendf(text, sizeof(text), &len, "\nbatteryPercent: %u\ncharging: %s",
+                     pct, charging ? "true" : "false");
+    char ssid[33];
+    if (network_get_ssid(ssid, sizeof(ssid)))
+        text_appendf(text, sizeof(text), &len, "\nssid: %s", ssid);
+    else
+        text_appendf(text, sizeof(text), &len, "\nssid: null (not connected to Wi-Fi)");
+    long long sd_free = 0, sd_total = 0;
+    if (files_sd_space(&sd_free, &sd_total))
+        text_appendf(text, sizeof(text), &len, "\nsdFreeBytes: %lld\nsdTotalBytes: %lld",
+                     sd_free, sd_total);
     send_tool_ok(req->fd, id, text);
 }
 

@@ -10,6 +10,11 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#ifdef __SWITCH__
+#include <switch.h>
+#else
+#include <sys/statvfs.h>
+#endif
 
 #define IO_BUF_SIZE 0x8000 // 32 KB
 
@@ -406,4 +411,25 @@ void files_handle_delete(HttpRequest *req) {
         return;
     }
     http_send_json(req->fd, 200, "{\"deleted\":\"%s\"}", fspath + strlen(FILES_ROOT));
+}
+
+bool files_sd_space(long long *out_free, long long *out_total) {
+#ifdef __SWITCH__
+    // "sdmc" is mounted by fsdevMountSdmc() in __appInit.
+    FsFileSystem *fs = fsdevGetDeviceFileSystem("sdmc");
+    s64 free_b = 0, total_b = 0;
+    if (!fs || R_FAILED(fsFsGetFreeSpace(fs, "/", &free_b)) ||
+        R_FAILED(fsFsGetTotalSpace(fs, "/", &total_b)))
+        return false;
+    *out_free = (long long)free_b;
+    *out_total = (long long)total_b;
+    return true;
+#else
+    struct statvfs st;
+    if (statvfs(FILES_ROOT, &st) != 0)
+        return false;
+    *out_free = (long long)st.f_bavail * (long long)st.f_frsize;
+    *out_total = (long long)st.f_blocks * (long long)st.f_frsize;
+    return true;
+#endif
 }
