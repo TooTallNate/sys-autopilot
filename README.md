@@ -359,6 +359,23 @@ GET /titles
 the control data isn't available. `storage` is `sd`, `nand`, or `gamecard`.
 Also exposed as the `list_installed_titles` MCP tool.
 
+### Uninstall a title
+
+Permanently delete an installed application — its base title, updates, and DLC
+on every storage — and remove it from the HOME menu. Save data is kept. `id` is
+the 16-hex-digit title id from `GET /titles`.
+
+```
+DELETE /titles?id=0100000000010000
+```
+
+```json
+{"ok":true,"titleId":"0100000000010000"}
+```
+
+A missing or malformed `id` returns 400; if the system rejects the uninstall
+the response is 500 with its result code. Also exposed as the `uninstall_title` MCP tool.
+
 ### Network DNS
 
 Read or change the DNS servers for the active network connection. Useful for

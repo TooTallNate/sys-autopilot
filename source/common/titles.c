@@ -1,5 +1,26 @@
 #include "titles.h"
 
+bool titles_parse_id(const char *s, uint64_t *out) {
+    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
+        s += 2;
+    uint64_t v = 0;
+    int n = 0;
+    for (; s[n]; n++) {
+        char c = s[n];
+        int d;
+        if (c >= '0' && c <= '9')      d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else return false;
+        if (n >= 16) return false;
+        v = (v << 4) | (uint64_t)d;
+    }
+    if (n != 16 || v == 0)
+        return false;
+    *out = v;
+    return true;
+}
+
 #ifdef __SWITCH__
 #include <switch.h>
 #include <string.h>
@@ -73,6 +94,18 @@ bool titles_list(TitleInfo *titles, int max, int *out_count,
     return true;
 }
 
+bool titles_uninstall(uint64_t title_id, char *err, size_t errsz) {
+    // Deletes all of the application's content (base, updates, DLC) across
+    // storages and its application record. Save data is left untouched.
+    Result rc = nsDeleteApplicationCompletely(title_id);
+    if (R_FAILED(rc)) {
+        snprintf(err, errsz, "uninstall failed (rc=0x%x)", rc);
+        return false;
+    }
+    LOGF("titles: uninstalled %016llx\n", (unsigned long long)title_id);
+    return true;
+}
+
 #else // !__SWITCH__ : host stub so the REST/MCP layer links in tests.
 
 #include <string.h>
@@ -81,6 +114,11 @@ bool titles_list(TitleInfo *titles, int max, int *out_count,
                  char *err, size_t errsz) {
     (void)titles; (void)max; (void)err; (void)errsz;
     *out_count = 0;
+    return true;
+}
+
+bool titles_uninstall(uint64_t title_id, char *err, size_t errsz) {
+    (void)title_id; (void)err; (void)errsz;
     return true;
 }
 
