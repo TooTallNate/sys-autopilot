@@ -1,5 +1,78 @@
 # sys-autopilot
 
+## 1.6.0
+
+### Minor Changes
+
+- [#22](https://github.com/TooTallNate/sys-autopilot/pull/22) [`9d8a105`](https://github.com/TooTallNate/sys-autopilot/commit/9d8a105e8371a8ea52cb9153e8886340ae36cf8b) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Add DNS configuration for the active network connection. `GET /network/dns`
+  reads the current config (automatic/manual + primary/secondary servers) and
+  `POST /network/dns` sets manual DNS servers or reverts to DHCP — handy for
+  pointing the console at a custom/black-hole DNS while keeping it on the LAN.
+  Also exposed as the `get_dns` / `set_dns` MCP tools.
+
+  Setting the profile requires the `nifm:a` admin service. Because libnx's
+  `nifmInitialize` is refcounted and ignores the service type after the first
+  call, the sysmodule now opens nifm as Admin at boot (a superset of the User
+  session used for mDNS) so the profile write is authorized.
+
+- [#37](https://github.com/TooTallNate/sys-autopilot/pull/37) [`7b27766`](https://github.com/TooTallNate/sys-autopilot/commit/7b27766f1fbd01d894421a0c270d98eceb96ffda) Thanks [@brendongl](https://github.com/brendongl)! - Add game save data backup and restore. `GET /saves` (and the `list_saves` MCP
+  tool) lists the saves in the NAND user save space; `GET /saves/files` browses
+  one, `GET /saves/export` streams it as a tar archive, and `GET /saves/raw`
+  streams the raw on-NAND save container. `PUT /saves/import` replaces an existing save's contents
+  with an exported tar, committed atomically when it fits the save's journal.
+  System saves are never listed or modified. No NPDM changes.
+
+- [#36](https://github.com/TooTallNate/sys-autopilot/pull/36) [`61454f2`](https://github.com/TooTallNate/sys-autopilot/commit/61454f248e98db2c53aef99ffd1481d229b14cd6) Thanks [@brendongl](https://github.com/brendongl)! - `GET /status` (and the `status` MCP tool) now also report the Atmosphère
+  version (`atmosphere`), the connected Wi-Fi network (`ssid`, `null` when not on
+  Wi-Fi), and SD card capacity (`sdFreeBytes` / `sdTotalBytes`).
+
+  Also fixes Atmosphère version detection, which never ran in the sysmodule:
+  it was gated on libnx's `hosversionIsAtmosphere()`, which is only set for
+  homebrew launched through the loader, so the `atmosphere` mDNS TXT key was
+  always missing. The Exosphère API version is now queried directly.
+
+- [#34](https://github.com/TooTallNate/sys-autopilot/pull/34) [`06f7989`](https://github.com/TooTallNate/sys-autopilot/commit/06f7989d22b2972f8b96da363e0405e18b968c6b) Thanks [@brendongl](https://github.com/brendongl)! - Add uninstalling installed titles. `DELETE /titles?id=<titleId>` permanently
+  deletes an application — its base title, updates, and DLC on every storage —
+  and removes it from the HOME menu, keeping its save data. Also exposed as the
+  `uninstall_title` MCP tool. Uses `nsDeleteApplicationCompletely` over the `ns`
+  access the installer already declares (no new NPDM services).
+
+### Patch Changes
+
+- [#25](https://github.com/TooTallNate/sys-autopilot/pull/25) [`51a249c`](https://github.com/TooTallNate/sys-autopilot/commit/51a249ca27be371020aaec1d2d1b0590e7cb3de3) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Support HTTP/1.1 keep-alive so MCP clients can reuse one connection across
+  initialize → notifications/initialized → tools/list. Responses previously
+  forced `Connection: close`, which made the Streamable HTTP transport's reused
+  socket get reset ("socket connection closed unexpectedly"). The server now
+  keeps the connection alive when the client speaks HTTP/1.1, drains the request
+  body between requests, and half-closes cleanly to avoid RSTs. `GET /mcp`
+  returns 405 (no server-initiated SSE stream offered), the spec-sanctioned way
+  to decline the optional channel.
+
+- [#24](https://github.com/TooTallNate/sys-autopilot/pull/24) [`b524891`](https://github.com/TooTallNate/sys-autopilot/commit/b52489188a4f013e61e910d12cb318f60466ee73) Thanks [@TooTallNate](https://github.com/TooTallNate)! - Fix ~5s latency on every request when reaching the console by its `.local`
+  hostname. The mDNS responder answered A queries but stayed silent for AAAA, so
+  dual-stack resolvers (macOS `getaddrinfo`, used by curl/ping and MCP clients)
+  blocked ~5s waiting on a nonexistent AAAA before falling back to IPv4. The A
+  record and the announcement now carry an NSEC record asserting "A only, no
+  AAAA" per RFC 6762 §6.1, so resolvers proceed immediately.
+
+- [#32](https://github.com/TooTallNate/sys-autopilot/pull/32) [`ef93465`](https://github.com/TooTallNate/sys-autopilot/commit/ef93465f433daf51fca1f50c3ae5797ac06c9b05) Thanks [@brendongl](https://github.com/brendongl)! - Fix `/install` rejecting valid NSPs with `write meta nca failed (0x1759)`.
+  `install_stream` sniffs the first 0x1104 bytes to tell NSP from XCI, but the
+  NSP path only drained as much of that prefix as the PFS0 header needed and
+  then dropped the rest. Small NSPs have headers of a few hundred bytes, so the
+  leftover bytes (ticket, cert and the start of the meta NCA) were lost, every
+  entry was read from the wrong offset, and the meta NCA failed its SHA-256
+  check. The leftover prefix is now replayed ahead of the stream.
+
+- [#35](https://github.com/TooTallNate/sys-autopilot/pull/35) [`104b997`](https://github.com/TooTallNate/sys-autopilot/commit/104b9971d9839ed13269c2a3fe6d82dafd501e99) Thanks [@brendongl](https://github.com/brendongl)! - `GET /titles` and the `list_installed_titles` MCP tool no longer stop at 256
+  titles. The content-meta listing used a fixed 256-entry buffer, so consoles
+  with more installed games silently got a truncated list. `GET /titles` now
+  returns every installed title by default and adds `total`/`offset` to the
+  response, plus optional `?offset=`/`&limit=` query parameters for fetching a
+  window. `list_installed_titles` takes `offset`/`limit` (default 256) and says
+  which offset to request next when more titles remain. Long display names are
+  now cut on a UTF-8 character boundary instead of mid-character, which could
+  produce invalid UTF-8 in the JSON responses.
+
 ## 1.5.0
 
 ### Minor Changes
