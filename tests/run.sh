@@ -30,6 +30,10 @@ echo "== test_install =="
 cc $CFLAGS -o "$OUT/test_install" test_install.c "$SRC/install.c"
 "$OUT/test_install"
 
+echo "== test_saves =="
+cc $CFLAGS -o "$OUT/test_saves" test_saves.c "$SRC/ustar.c" "$SRC/saves.c"
+"$OUT/test_saves"
+
 echo "== test_oauth =="
 cc $CFLAGS \
     -DOAUTH_TOKENS_PATH="\"$FAKE_SD-tokens.txt\"" \
@@ -48,7 +52,7 @@ cc $CFLAGS -Ifake \
     "$SRC/mcp.c" "$SRC/http.c" "$SRC/base64.c" "$SRC/json.c" "$SRC/jstream.c" \
     "$SRC/buttons.c" "$SRC/apiargs.c" "$SRC/files.c" "$SRC/power.c" \
     "$SRC/oauth.c" "$SRC/sha256.c" "$SRC/config.c" "$SRC/device_info.c" \
-    "$SRC/settings.c" "$SRC/titles.c" "$SRC/network.c"
+    "$SRC/settings.c" "$SRC/titles.c" "$SRC/network.c" "$SRC/saves.c"
 "$OUT/test_mcp"
 
 # Release tooling: our resilient changelog generator (replaces the flaky
