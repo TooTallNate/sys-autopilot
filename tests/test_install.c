@@ -197,6 +197,55 @@ static void test_container_detect(void) {
     printf("  container detect (nsp/xci-trimmed/xci-full/unknown): ok\n");
 }
 
+// Stream source for the prefix reader test: hands out bytes of `data` in
+// chunks of at most `max_chunk` to mimic short socket reads.
+typedef struct {
+    const uint8_t *data;
+    size_t len, pos, max_chunk;
+} MemStream;
+
+static long mem_read(void *ctx, void *buf, size_t len) {
+    MemStream *m = ctx;
+    if (m->pos >= m->len) return 0;
+    size_t n = m->len - m->pos;
+    if (n > len) n = len;
+    if (n > m->max_chunk) n = m->max_chunk;
+    memcpy(buf, m->data + m->pos, n);
+    m->pos += n;
+    return (long)n;
+}
+
+static void test_prefix_reader(void) {
+    // Simulates install_stream: the first 0x1104 bytes were sniffed into a
+    // prefix, a short PFS0 header consumed 0x100 of them, and the rest must be
+    // replayed before the live stream so the entries' bytes stay in order.
+    static uint8_t file[0x3000];
+    for (size_t i = 0; i < sizeof(file); i++) file[i] = (uint8_t)(i * 31 + 7);
+    const size_t sniffed = 0x1104, header = 0x100;
+
+    MemStream ms = { file, sizeof(file), sniffed, 0x333 };
+    InstallPrefixReader pr = {
+        .read_fn = mem_read, .ctx = &ms,
+        .prefix = file + header, .prefix_len = sniffed - header,
+    };
+
+    static uint8_t out[sizeof(file)];
+    size_t got = 0;
+    long n;
+    while ((n = install_prefix_read(&pr, out + got, 0x500)) > 0) got += (size_t)n;
+    assert(got == sizeof(file) - header);
+    assert(memcmp(out, file + header, got) == 0);
+    assert(pr.prefix_len == 0);
+
+    // Empty prefix passes straight through to the stream.
+    MemStream ms2 = { file, sizeof(file), 0, 0x1000 };
+    InstallPrefixReader pr2 = { .read_fn = mem_read, .ctx = &ms2 };
+    assert(install_prefix_read(&pr2, out, 0x10) == 0x10);
+    assert(memcmp(out, file, 0x10) == 0);
+
+    printf("  prefix reader replays leftover sniff bytes: ok\n");
+}
+
 int main(void) {
     printf("== test_install ==\n");
     test_basic();
@@ -206,6 +255,7 @@ int main(void) {
     test_hfs0_basic();
     test_hfs0_bad_magic();
     test_container_detect();
+    test_prefix_reader();
     printf("test_install: all passed\n");
     return 0;
 }

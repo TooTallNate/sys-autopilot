@@ -165,6 +165,18 @@ ContainerKind container_detect(const uint8_t *buf, size_t len,
     return CONTAINER_UNKNOWN;
 }
 
+long install_prefix_read(void *ctx, void *buf, size_t len) {
+    InstallPrefixReader *pr = (InstallPrefixReader *)ctx;
+    if (pr->prefix_len > 0) {
+        size_t take = pr->prefix_len < len ? pr->prefix_len : len;
+        memcpy(buf, pr->prefix, take);
+        pr->prefix += take;
+        pr->prefix_len -= take;
+        return (long)take;
+    }
+    return pr->read_fn(pr->ctx, buf, len);
+}
+
 #ifdef __SWITCH__
 #include <switch.h>
 #include <stdarg.h>
@@ -708,7 +720,13 @@ static bool install_nsp(InstallReadFn read_fn, void *ctx, NcmStorageId sid,
         entries[i].abs_offset = data_start + pe[i].offset;
         entries[i].size = pe[i].size;
     }
-    return install_entries(read_fn, ctx, consumed, entries, file_count, sid, true, out);
+    // The 0x1104-byte detection prefix usually extends past the PFS0 header
+    // (small NSPs have headers of a few hundred bytes); those leftover bytes
+    // are the start of the first entries, so replay them ahead of the stream.
+    InstallPrefixReader pr = {
+        .read_fn = read_fn, .ctx = ctx, .prefix = prefix, .prefix_len = prefix_len,
+    };
+    return install_entries(install_prefix_read, &pr, consumed, entries, file_count, sid, true, out);
 }
 
 // XCI front-end: skip to the root HFS0, locate the "secure" partition, parse it,
