@@ -96,6 +96,7 @@ static void test_tools_list(void) {
     assert(strstr(r, "\"tap_buttons\""));
     assert(strstr(r, "\"upload_file\""));
     assert(strstr(r, "\"hash_file\""));
+    assert(strstr(r, "\"list_saves\""));
     assert(strstr(r, "\"screenshot\""));
     assert(strstr(r, "\"inputSchema\""));
     printf("tools/list ok\n");
@@ -470,6 +471,15 @@ static void test_list_titles(void) {
     printf("list_installed_titles ok\n");
 }
 
+static void test_list_saves(void) {
+    // Host stub reports no saves; the tool still answers with readable text.
+    const char *r = do_rpc("{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"tools/call\","
+                           "\"params\":{\"name\":\"list_saves\",\"arguments\":{}}}");
+    assert(strstr(r, "\"isError\":false"));
+    assert(strstr(r, "(no game saves)"));
+    printf("list_saves ok\n");
+}
+
 static Config g_cfg_for_oauth;
 
 int main(void) {
@@ -491,6 +501,7 @@ int main(void) {
     test_status();
     test_uninstall_title();
     test_list_titles();
+    test_list_saves();
     printf("all mcp tests passed\n");
     return 0;
 }
