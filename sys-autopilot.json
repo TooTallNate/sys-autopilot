@@ -68,6 +68,7 @@
 				"svcOutputDebugString":	"0x27",
 				"svcReturnFromException":	"0x28",
 				"svcGetInfo":	"0x29",
+				"svcGetSystemInfo":	"0x6f",
 				"svcWaitForAddress":	"0x34",
 				"svcSignalToAddress":	"0x35",
 				"svcCreateSession":	"0x40",

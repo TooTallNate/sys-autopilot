@@ -352,6 +352,13 @@ static void test_status(void) {
     assert(strstr(r, "ssid: test-ssid"));
     assert(strstr(r, "sdFreeBytes: "));
     assert(strstr(r, "sdTotalBytes: "));
+    // Values from the memstats_get() stub.
+    assert(strstr(r, "systemMemoryTotal: 268435456"));
+    assert(strstr(r, "systemMemoryUsed: 264241152"));
+    assert(strstr(r, "systemMemoryFree: 4194304"));
+    assert(strstr(r, "heapSize: 1572864"));
+    assert(strstr(r, "heapInUse: 4096"));
+    assert(strstr(r, "heapPeak: 8192"));
     // Host device_info reports no Atmosphère version, so the line is omitted
     // rather than printed empty.
     assert(strstr(r, "atmosphere:") == NULL);

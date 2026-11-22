@@ -1,10 +1,11 @@
 // Host-side stubs for the Switch-coupled modules (input, screen, routes
-// metadata) so mcp.c can be exercised end-to-end in tests.
+// metadata, memory stats) so mcp.c can be exercised end-to-end in tests.
 #include <switch.h>
 #include <string.h>
 #include <strings.h>
 
 #include "input.h"
+#include "memstats.h"
 #include "screen.h"
 #include "routes.h"
 
@@ -58,6 +59,15 @@ bool screen_parse_stack(const char *name, ViLayerStack *out) {
     else if (strcasecmp(name, "lastframe") == 0) *out = ViLayerStack_LastFrame;
     else return false;
     return true;
+}
+
+void memstats_get(MemStats *out) {
+    out->sys_ok = true;
+    out->sys_total = 256u << 20;
+    out->sys_used = 252u << 20;
+    out->heap_size = 0x180000;
+    out->heap_in_use = 0x1000;
+    out->heap_peak = 0x2000;
 }
 
 const char *routes_app_version(void) { return "test"; }
