@@ -6,6 +6,7 @@
 #include "files.h"
 #include "input.h"
 #include "json.h"
+#include "memstats.h"
 #include "oauth.h"
 #include "power.h"
 #include "jstream.h"
@@ -380,7 +381,7 @@ static void text_appendf(char *buf, size_t cap, size_t *len, const char *fmt, ..
 
 static void tool_status(HttpRequest *req, const char *id) {
     u32 ver = hosversionGet();
-    char text[512];
+    char text[768];
     size_t len = 0;
     text[0] = '\0';
     text_appendf(text, sizeof(text), &len, "version: %s\nfirmware: %u.%u.%u",
@@ -406,6 +407,15 @@ static void tool_status(HttpRequest *req, const char *id) {
     if (files_sd_space(&sd_free, &sd_total))
         text_appendf(text, sizeof(text), &len, "\nsdFreeBytes: %lld\nsdTotalBytes: %lld",
                      sd_free, sd_total);
+    MemStats ms;
+    memstats_get(&ms);
+    if (ms.sys_ok)
+        text_appendf(text, sizeof(text), &len,
+                     "\nsystemMemoryTotal: %llu\nsystemMemoryUsed: %llu\nsystemMemoryFree: %llu",
+                     (unsigned long long)ms.sys_total, (unsigned long long)ms.sys_used,
+                     (unsigned long long)(ms.sys_total - ms.sys_used));
+    text_appendf(text, sizeof(text), &len, "\nheapSize: %zu\nheapInUse: %zu\nheapPeak: %zu",
+                 ms.heap_size, ms.heap_in_use, ms.heap_peak);
     send_tool_ok(req->fd, id, text);
 }
 

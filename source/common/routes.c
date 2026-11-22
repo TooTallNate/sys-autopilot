@@ -14,6 +14,7 @@
 #include "settings.h"
 #include "log.h"
 #include "device_info.h"
+#include "memstats.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -184,16 +185,29 @@ static void handle_status(HttpRequest *req) {
         snprintf(sd, sizeof(sd), ",\"sdFreeBytes\":%lld,\"sdTotalBytes\":%lld",
                  sd_free, sd_total);
 
+    MemStats ms;
+    memstats_get(&ms);
+    char mem[256];
+    int mn = 0;
+    if (ms.sys_ok)
+        mn = snprintf(mem, sizeof(mem),
+                      ",\"systemMemoryTotal\":%llu,\"systemMemoryUsed\":%llu,\"systemMemoryFree\":%llu",
+                      (unsigned long long)ms.sys_total, (unsigned long long)ms.sys_used,
+                      (unsigned long long)(ms.sys_total - ms.sys_used));
+    snprintf(mem + mn, sizeof(mem) - mn,
+             ",\"heapSize\":%zu,\"heapInUse\":%zu,\"heapPeak\":%zu",
+             ms.heap_size, ms.heap_in_use, ms.heap_peak);
+
     http_send_json(req->fd, 200,
                    "{\"version\":\"" APP_VERSION "\","
                    "\"firmware\":\"%u.%u.%u\"%s,"
                    "\"controllerAttached\":%s,"
                    "\"uptimeSeconds\":%llu%s,"
-                   "\"ssid\":%s%s}",
+                   "\"ssid\":%s%s%s}",
                    HOSVER_MAJOR(ver), HOSVER_MINOR(ver), HOSVER_MICRO(ver), ams,
                    input_is_attached() ? "true" : "false",
                    (unsigned long long)routes_uptime_seconds(), batt,
-                   ssid_json, sd);
+                   ssid_json, sd, mem);
 }
 
 // --- /settings/* --------------------------------------------------------------

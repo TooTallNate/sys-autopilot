@@ -7,6 +7,7 @@
 #include "common/input.h"
 #include "common/install.h"
 #include "common/log.h"
+#include "common/memstats.h"
 #include "common/netif.h"
 #include "common/oauth.h"
 #include "common/power.h"
@@ -16,7 +17,7 @@
 // Inner heap: socket transfer memory + stdio buffers + dir listing JSON +
 // headroom for the title installer (ncm IPC, mounting the cnmt NCA). The large
 // fixed buffers (JPEG, I/O, HDLS workmem, install chunk) are static bss.
-#define INNER_HEAP_SIZE 0x400000
+#define INNER_HEAP_SIZE 0x180000 // 1.5 MiB: measured peak ~420 KB (save export, 4 MiB upload, listings)
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,8 @@ void __libnx_initheap(void)
     extern void* fake_heap_start;
     extern void* fake_heap_end;
 
+    // Fill it so memstats can report how much of it was ever used.
+    memset(inner_heap, MEMSTATS_HEAP_FILL, sizeof(inner_heap));
     fake_heap_start = inner_heap;
     fake_heap_end   = inner_heap + sizeof(inner_heap);
 }
